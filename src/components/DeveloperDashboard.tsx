@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { 
-  BarChart3, 
   Download, 
   Eye, 
   Heart, 
@@ -47,16 +46,6 @@ export const DeveloperDashboard: React.FC<DeveloperDashboardProps> = ({
   const totalDownloads = userProjects.reduce((sum, p) => sum + (p.downloads || 0), 0);
   const totalViews = userProjects.reduce((sum, p) => sum + (p.views || 0), 0);
   const totalFavorites = userProjects.reduce((sum, p) => sum + (p.favoritesCount || 0), 0);
-
-  // Compute monthly statistics data for the visual analytics chart
-  const monthlyStats = [
-    { month: 'Jan', downloads: Math.max(12, Math.round(totalDownloads * 0.12)), views: Math.max(40, Math.round(totalViews * 0.14)) },
-    { month: 'Fév', downloads: Math.max(28, Math.round(totalDownloads * 0.18)), views: Math.max(80, Math.round(totalViews * 0.20)) },
-    { month: 'Mar', downloads: Math.max(65, Math.round(totalDownloads * 0.30)), views: Math.max(160, Math.round(totalViews * 0.32)) },
-    { month: 'Avr', downloads: Math.max(95, Math.round(totalDownloads * 0.40)), views: Math.max(240, Math.round(totalViews * 0.34)) },
-  ];
-
-  const maxVal = Math.max(...monthlyStats.map(m => Math.max(m.downloads, m.views)), 100);
 
   // Sort projects by popularity
   const topProjects = [...userProjects].sort((a, b) => (b.downloads || 0) - (a.downloads || 0)).slice(0, 3);
@@ -147,66 +136,6 @@ export const DeveloperDashboard: React.FC<DeveloperDashboardProps> = ({
             {totalFavorites.toLocaleString('fr-FR')}
           </div>
           <p className="text-[11px] text-zinc-500">Ajoutés en favoris par les devs</p>
-        </div>
-      </div>
-
-      {/* 📈 Statistiques Chart & Trends Component */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
-          <div className="space-y-1">
-            <h2 className="text-lg font-bold text-white font-mono flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-cyan-400" />
-              <span>📈 Statistiques Mensuelles</span>
-            </h2>
-            <p className="text-xs text-zinc-400">Évolution chronologique de l'audience et des téléchargements</p>
-          </div>
-
-          <div className="flex items-center gap-4 text-xs font-mono">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-emerald-400" />
-              <span className="text-zinc-300">Téléchargements</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-blue-500" />
-              <span className="text-zinc-300">Vues</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ASCII / Bar Visual representation */}
-        <div className="space-y-4 pt-2">
-          {monthlyStats.map((item, idx) => {
-            const dlPercent = Math.min(100, Math.max(8, (item.downloads / maxVal) * 100));
-            const viewPercent = Math.min(100, Math.max(12, (item.views / maxVal) * 100));
-
-            return (
-              <div key={idx} className="space-y-1.5 p-3 rounded-2xl bg-zinc-950/70 border border-zinc-800/80">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="font-bold text-cyan-300 w-12">{item.month}</span>
-                  <div className="flex items-center gap-4 text-zinc-400">
-                    <span className="text-emerald-400 font-semibold">{item.downloads} dl</span>
-                    <span className="text-blue-400 font-semibold">{item.views} vues</span>
-                  </div>
-                </div>
-
-                {/* Progress bar visual */}
-                <div className="space-y-1">
-                  <div className="w-full h-3 bg-zinc-900 rounded-full overflow-hidden flex">
-                    <div 
-                      style={{ width: `${dlPercent}%` }} 
-                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-700"
-                    />
-                  </div>
-                  <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden flex">
-                    <div 
-                      style={{ width: `${viewPercent}%` }} 
-                      className="h-full bg-gradient-to-r from-blue-600 to-cyan-500 rounded-full transition-all duration-700"
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
         </div>
       </div>
 
