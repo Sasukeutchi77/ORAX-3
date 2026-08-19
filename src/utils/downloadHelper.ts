@@ -1,6 +1,5 @@
 import JSZip from 'jszip';
 import { Project } from '../types';
-import { getFileFromIndexedDB } from './fileStorage';
 
 /**
  * Universal Mobile & Desktop Download Engine for ORAX PROJET
@@ -11,41 +10,7 @@ export async function triggerProjectDownload(project: Project): Promise<void> {
   const cleanFileName = baseName.includes('.') ? baseName : `${baseName}.zip`;
 
   // -------------------------------------------------------------------------
-  // 1. Check local IndexedDB storage for original binary file
-  // -------------------------------------------------------------------------
-  try {
-    const idRecord = await getFileFromIndexedDB(project.id);
-    if (idRecord && idRecord.data) {
-      downloadBlobDirectly(idRecord.data, idRecord.name || cleanFileName);
-      return;
-    }
-
-    if (project.fileUrl) {
-      const urlRecord = await getFileFromIndexedDB(project.fileUrl);
-      if (urlRecord && urlRecord.data) {
-        downloadBlobDirectly(urlRecord.data, urlRecord.name || cleanFileName);
-        return;
-      }
-    }
-  } catch (dbErr) {
-    console.warn('IndexedDB retrieval notice:', dbErr);
-  }
-
-  // -------------------------------------------------------------------------
-  // 2. Handle Data URL (Base64)
-  // -------------------------------------------------------------------------
-  if (project.fileUrl && project.fileUrl.startsWith('data:')) {
-    try {
-      const blob = dataUrlToBlob(project.fileUrl);
-      downloadBlobDirectly(blob, cleanFileName);
-      return;
-    } catch (err) {
-      console.warn('Data URL parse error:', err);
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // 3. Handle Remote URLs (Cloudinary, GitHub, CDN, Direct Server Link)
+  // 1. Handle Remote URLs (Cloudinary, GitHub, CDN, Direct Server Link)
   // -------------------------------------------------------------------------
   if (project.fileUrl && (project.fileUrl.startsWith('http://') || project.fileUrl.startsWith('https://'))) {
     let targetUrl = project.fileUrl;

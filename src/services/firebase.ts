@@ -17,7 +17,6 @@ import {
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
-  setLogLevel,
   collection,
   doc,
   getDocs,
@@ -32,9 +31,7 @@ import {
   where,
   limit,
   startAfter,
-  QueryDocumentSnapshot,
   DocumentSnapshot,
-  DocumentData,
   onSnapshot,
   Firestore
 } from 'firebase/firestore';
@@ -51,7 +48,16 @@ import {
   DeveloperInfo,
   FirebaseConfigDiagnostic
 } from '../types';
-import { deleteStoredFile } from '../utils/fileStorage';
+
+// Clean legacy local storage items on initialization
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('orax_projet_items_v2');
+    localStorage.removeItem('orax_projet_reports_v2');
+    localStorage.removeItem('orax_demo_seeded');
+    localStorage.removeItem('orax_projects_backup');
+  } catch {}
+}
 
 const firebaseConfig = {
   apiKey: (import.meta.env.VITE_FIREBASE_API_KEY || '').trim(),
@@ -76,7 +82,6 @@ export function isFirebaseConfigured(): boolean {
 
 /**
  * Validates the Firebase configuration and outputs a single formatted diagnostic notice.
- * Never throws and never halts the application.
  */
 let hasLoggedConfigDiagnostic = false;
 export function validateAndLogFirebaseConfig(): void {
@@ -85,30 +90,26 @@ export function validateAndLogFirebaseConfig(): void {
 
   const diagnostic = getFirebaseConfigDiagnostic();
   if (diagnostic.status === 'unconfigured') {
-    console.info(
-      '%c[ORAX Firebase]%c Variables VITE_FIREBASE_* non configurées. L\'application fonctionne en mode local hors-ligne.',
-      'color: #38bdf8; font-weight: bold;',
+    console.warn(
+      '%c[ORAX Cloud Engine]%c Configuration Firebase requise. Configurez les variables VITE_FIREBASE_* sur Netlify ou dans votre fichier .env.',
+      'color: #f59e0b; font-weight: bold;',
       'color: #94a3b8;'
     );
   } else if (diagnostic.status === 'incomplete') {
     console.warn(
-      `[ORAX Firebase] Configuration incomplète. Variables manquantes : ${diagnostic.missingVariables.join(', ')}.`
+      `[ORAX Cloud Engine] Configuration incomplète. Variables manquantes : ${diagnostic.missingVariables.join(', ')}.`
     );
   } else {
     console.info(
-      '%c[ORAX Firebase]%c Configuration connectée au projet : ' + diagnostic.projectId,
+      '%c[ORAX Cloud Engine]%c Connecté à Firebase Firestore Cloud : ' + diagnostic.projectId,
       'color: #10b981; font-weight: bold;',
       'color: #94a3b8;'
     );
   }
 }
 
-/**
- * Non-sensitive Firebase environment diagnostics.
- * NEVER exposes secret keys; only provides boolean presence flags and missing variable names.
- */
 export function getFirebaseConfigDiagnostic(): FirebaseConfigDiagnostic {
-  const vars = [
+  const variables = [
     { name: 'VITE_FIREBASE_API_KEY', present: Boolean(firebaseConfig.apiKey) },
     { name: 'VITE_FIREBASE_AUTH_DOMAIN', present: Boolean(firebaseConfig.authDomain) },
     { name: 'VITE_FIREBASE_PROJECT_ID', present: Boolean(firebaseConfig.projectId) },
@@ -117,31 +118,22 @@ export function getFirebaseConfigDiagnostic(): FirebaseConfigDiagnostic {
     { name: 'VITE_FIREBASE_APP_ID', present: Boolean(firebaseConfig.appId) },
   ];
 
-  const missingVariables = vars.filter(v => !v.present).map(v => v.name);
-  const isConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
+  const missingVariables = variables.filter(v => !v.present).map(v => v.name);
 
-  let status: 'connected' | 'incomplete' | 'unconfigured' = 'unconfigured';
-  if (missingVariables.length === 0) {
-    status = 'connected';
-  } else if (isConfigured) {
+  let status: 'connected' | 'incomplete' | 'unconfigured' = 'connected';
+  if (missingVariables.length === variables.length) {
+    status = 'unconfigured';
+  } else if (missingVariables.length > 0) {
     status = 'incomplete';
   }
 
   return {
-    isConfigured,
+    isConfigured: isFirebaseConfigured(),
     status,
-    variables: vars,
+    variables,
     missingVariables,
-    projectId: firebaseConfig.projectId ? firebaseConfig.projectId : undefined,
+    projectId: firebaseConfig.projectId || undefined,
   };
-}
-
-export function formatFileSize(bytes: number): string {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 let app: FirebaseApp | null = null;
@@ -150,117 +142,475 @@ let db: Firestore | null = null;
 
 if (isFirebaseConfigured()) {
   try {
-    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+    app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     auth = getAuth(app);
-    
-    // Explicitly guarantee browser local storage persistence across sessions & refreshes
-    setPersistence(auth, browserLocalPersistence).catch((persistenceErr) => {
-      console.warn('[ORAX Firebase Auth] Persistence fallback:', persistenceErr);
+
+    // Set persistence to browserLocalPersistence
+    setPersistence(auth, browserLocalPersistence).catch((err) => {
+      console.warn('Firebase Auth persistence setup notice:', err);
     });
 
     try {
-      setLogLevel('silent');
       db = initializeFirestore(app, {
         localCache: persistentLocalCache({
           tabManager: persistentMultipleTabManager(),
         }),
-        experimentalForceLongPolling: true,
       });
     } catch {
       db = getFirestore(app);
     }
   } catch (err) {
-    console.warn('[ORAX Firebase] Initialization notice:', err);
+    console.error('Firebase initialization error:', err);
   }
 }
 
-// Log diagnostic once in browser environment
-validateAndLogFirebaseConfig();
-
 // --------------------------------------------------------------------------
-// CLOUD SYNCHRONIZATION STATE LISTENER
+// SYNC STATE MANAGEMENT
 // --------------------------------------------------------------------------
-let currentSyncStatus: CloudSyncState = isFirebaseConfigured() 
-  ? (typeof navigator !== 'undefined' && navigator.onLine ? 'connecting' : 'offline') 
-  : 'offline';
-const SYNC_STATUS_EVENT = 'orax_sync_status_changed';
+let currentSyncStatus: CloudSyncState = isFirebaseConfigured() ? 'connecting' : 'offline';
+const syncListeners = new Set<(status: CloudSyncState) => void>();
 
 export function getSyncStatus(): CloudSyncState {
   return currentSyncStatus;
 }
 
-export function updateSyncStatus(newStatus: CloudSyncState): void {
+export function subscribeToSyncStatus(listener: (status: CloudSyncState) => void): () => void {
+  syncListeners.add(listener);
+  listener(currentSyncStatus);
+  return () => {
+    syncListeners.delete(listener);
+  };
+}
+
+function updateSyncStatus(newStatus: CloudSyncState): void {
   if (currentSyncStatus !== newStatus) {
     currentSyncStatus = newStatus;
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(SYNC_STATUS_EVENT, { detail: newStatus }));
-    }
+    syncListeners.forEach((fn) => fn(currentSyncStatus));
   }
 }
 
-export function subscribeToSyncStatus(callback: (status: CloudSyncState) => void): () => void {
-  callback(currentSyncStatus);
-  const handler = (e: Event) => {
-    const custom = e as CustomEvent<CloudSyncState>;
-    callback(custom.detail || currentSyncStatus);
-  };
-  window.addEventListener(SYNC_STATUS_EVENT, handler);
-  
-  const onlineHandler = () => updateSyncStatus(isFirebaseConfigured() ? 'connecting' : 'offline');
-  const offlineHandler = () => updateSyncStatus('offline');
-  
-  window.addEventListener('online', onlineHandler);
-  window.addEventListener('offline', offlineHandler);
-
-  return () => {
-    window.removeEventListener(SYNC_STATUS_EVENT, handler);
-    window.removeEventListener('online', onlineHandler);
-    window.removeEventListener('offline', offlineHandler);
-  };
-}
-
-// Admin email configured for LORD DEMON admin privileges
-const ADMIN_EMAILS = new Set([
-  'epargnelock@gmail.com',
-  'lord.demon.dev@orax.net',
-  'mikeysano45t@gmail.com'
+// --------------------------------------------------------------------------
+// ADMIN CONFIGURATION
+// --------------------------------------------------------------------------
+export const ADMIN_EMAILS = new Set([
+  'lorddemon@gmail.com',
+  'lorddemon.orax@gmail.com',
+  'lorddemon@orax.com',
+  'admin@orax.com',
+  'fondateur@orax.com'
 ]);
 
-export function checkIsAdmin(
-  user: UserProfile | { email?: string; uid?: string; isAdmin?: boolean } | null,
-  hasCustomClaimAdmin?: boolean
-): boolean {
+export function checkIsAdmin(user?: { email?: string; uid?: string } | null): boolean {
   if (!user) return false;
-  if (hasCustomClaimAdmin === true) return true;
-  if (user.isAdmin === true) return true;
   if (user.uid === 'dev_lord_demon') return true;
-  if (user.email && ADMIN_EMAILS.has(user.email.toLowerCase())) return true;
+  if (user.email && ADMIN_EMAILS.has(user.email.toLowerCase().trim())) {
+    return true;
+  }
   return false;
 }
 
-// Helper to remove any undefined properties before sending to Firestore
 function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
-  const clean: Record<string, any> = {};
+  const clean: any = Array.isArray(obj) ? [] : {};
   for (const [key, value] of Object.entries(obj)) {
     if (value !== undefined) {
-      if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+      if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
         clean[key] = sanitizeForFirestore(value);
       } else {
         clean[key] = value;
       }
     }
   }
-  return clean as T;
+  return clean;
+}
+
+// Session cache (Only for auth state preservation across page reloads)
+const STORAGE_KEY_SESSION_UI = 'orax_projet_cached_session_v3';
+
+function getCachedSession(): UserProfile | null {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SESSION_UI);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      parsed.isAdmin = checkIsAdmin(parsed);
+      return parsed;
+    }
+  } catch {}
+  return null;
+}
+
+function saveCachedSession(user: UserProfile | null): void {
+  try {
+    if (user) {
+      user.isAdmin = checkIsAdmin(user);
+      localStorage.setItem(STORAGE_KEY_SESSION_UI, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(STORAGE_KEY_SESSION_UI);
+    }
+  } catch {}
+}
+
+export function clearUserPrivateCache(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY_SESSION_UI);
+  } catch {}
 }
 
 // --------------------------------------------------------------------------
-// LOCAL CACHE ONLY (Used for instant UI paint & offline fallback)
-// Firestore is the sole SOURCE OF TRUTH.
+// AUTHENTICATION ERROR HANDLING
 // --------------------------------------------------------------------------
-const STORAGE_KEY_PROJECTS = 'orax_projet_items_v2';
-const STORAGE_KEY_REPORTS = 'orax_projet_reports_v2';
-const STORAGE_KEY_SESSION_UI = 'orax_projet_cached_session_v2';
+export function formatAuthErrorMessage(error: any): string {
+  const code = error?.code || '';
+  const msg = error?.message || '';
 
+  if (code.includes('auth/invalid-email') || msg.includes('invalid-email')) {
+    return 'L\'adresse email saisie est invalide. Veuillez vérifier le format.';
+  }
+  if (code.includes('auth/user-not-found') || msg.includes('user-not-found')) {
+    return 'Aucun compte associé à cette adresse email.';
+  }
+  if (code.includes('auth/wrong-password') || msg.includes('wrong-password') || code.includes('auth/invalid-credential')) {
+    return 'Email ou mot de passe incorrect.';
+  }
+  if (code.includes('auth/email-already-in-use') || msg.includes('email-already-in-use')) {
+    return 'Cette adresse email est déjà enregistrée. Veuillez vous connecter.';
+  }
+  if (code.includes('auth/weak-password') || msg.includes('weak-password')) {
+    return 'Le mot de passe doit contenir au moins 6 caractères.';
+  }
+  if (code.includes('auth/too-many-requests') || msg.includes('too-many-requests')) {
+    return 'Trop de tentatives infructueuses. Veuillez patienter quelques minutes avant de réessayer.';
+  }
+  if (code.includes('auth/network-request-failed') || msg.includes('network-request-failed')) {
+    return 'Erreur de connexion réseau. Veuillez vérifier votre accès Internet.';
+  }
+  if (code.includes('auth/configuration-not-found') || msg.includes('configuration-not-found')) {
+    return 'Configuration Firebase Auth manquante. Vérifiez vos variables d\'environnement.';
+  }
+
+  return msg || 'Une erreur inattendue est survenue lors de l\'authentification.';
+}
+
+export async function signUp(email: string, password: string, displayName: string, avatarUrl?: string): Promise<UserProfile> {
+  if (!auth || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase requise pour créer un compte cloud.');
+  }
+
+  try {
+    updateSyncStatus('syncing');
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const fbUser = userCredential.user;
+
+    const isAdmin = checkIsAdmin({ email, uid: fbUser.uid });
+    let finalDisplayName = displayName.trim();
+    if (!isAdmin) {
+      const lower = finalDisplayName.toLowerCase();
+      if (lower.includes('lord demon') || lower.includes('lorddemon') || lower === 'admin' || lower.includes('fondateur orax')) {
+        finalDisplayName = email.split('@')[0] || 'Développeur';
+      }
+    }
+
+    const defaultPhoto = avatarUrl?.trim() || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(finalDisplayName)}`;
+
+    await updateProfile(fbUser, {
+      displayName: finalDisplayName,
+      photoURL: defaultPhoto,
+    });
+
+    const newProfile: UserProfile = {
+      uid: fbUser.uid,
+      email: fbUser.email || email,
+      displayName: finalDisplayName,
+      photoURL: defaultPhoto,
+      createdAt: new Date().toISOString(),
+      isAdmin,
+      favorites: [],
+      following: [],
+      publishedTrophies: [],
+      trophiesPrivacy: 'public',
+    };
+
+    if (db) {
+      await setDoc(doc(db, 'users', fbUser.uid), sanitizeForFirestore(newProfile), { merge: true });
+    }
+
+    saveCachedSession(newProfile);
+    updateSyncStatus('synced');
+    return newProfile;
+  } catch (err: any) {
+    updateSyncStatus('error');
+    throw new Error(formatAuthErrorMessage(err));
+  }
+}
+
+export async function signIn(email: string, password: string): Promise<UserProfile> {
+  if (!auth || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase requise pour se connecter.');
+  }
+
+  try {
+    updateSyncStatus('syncing');
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const fbUser = userCredential.user;
+    const isAdmin = checkIsAdmin({ email: fbUser.email || email, uid: fbUser.uid });
+
+    let profile: UserProfile = {
+      uid: fbUser.uid,
+      email: fbUser.email || email,
+      displayName: fbUser.displayName || email.split('@')[0] || 'Utilisateur',
+      photoURL: fbUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(fbUser.displayName || email)}`,
+      createdAt: new Date().toISOString(),
+      isAdmin,
+      favorites: [],
+      following: [],
+      publishedTrophies: [],
+      trophiesPrivacy: 'public',
+    };
+
+    if (db) {
+      try {
+        const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as UserProfile;
+          profile = { ...profile, ...userData, isAdmin, uid: fbUser.uid };
+        } else {
+          await setDoc(doc(db, 'users', fbUser.uid), sanitizeForFirestore(profile), { merge: true });
+        }
+      } catch (firestoreErr) {
+        console.warn('User profile sync notice:', firestoreErr);
+      }
+    }
+
+    saveCachedSession(profile);
+    updateSyncStatus('synced');
+    return profile;
+  } catch (err: any) {
+    updateSyncStatus('error');
+    throw new Error(formatAuthErrorMessage(err));
+  }
+}
+
+export async function logOut(): Promise<void> {
+  if (auth) {
+    await signOut(auth);
+  }
+  clearUserPrivateCache();
+}
+
+export const registerUser = signUp;
+export const loginUser = signIn;
+
+export async function sendPasswordReset(email: string): Promise<void> {
+  if (!auth || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase requise pour réinitialiser le mot de passe.');
+  }
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (err: any) {
+    throw new Error(formatAuthErrorMessage(err));
+  }
+}
+
+export const resetUserPassword = sendPasswordReset;
+
+export async function updateUserDisplayName(displayName: string): Promise<UserProfile> {
+  const currentAuthUser = auth?.currentUser;
+  if (!currentAuthUser) {
+    throw new Error('Utilisateur non connecté.');
+  }
+
+  const cleanName = displayName.trim();
+  if (!cleanName) {
+    throw new Error('Le nom d\'affichage ne peut pas être vide.');
+  }
+
+  const isAdmin = checkIsAdmin({ email: currentAuthUser.email || '', uid: currentAuthUser.uid });
+  if (!isAdmin) {
+    const lower = cleanName.toLowerCase();
+    if (lower.includes('lord demon') || lower.includes('lorddemon') || lower === 'admin' || lower.includes('fondateur orax')) {
+      throw new Error('Ce nom d\'affichage est réservé.');
+    }
+  }
+
+  await updateProfile(currentAuthUser, { displayName: cleanName });
+
+  if (db && isFirebaseConfigured()) {
+    await updateDoc(doc(db, 'users', currentAuthUser.uid), {
+      displayName: cleanName,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  const currentSession = getCachedSession();
+  const updatedProfile: UserProfile = {
+    uid: currentAuthUser.uid,
+    email: currentAuthUser.email || '',
+    displayName: cleanName,
+    photoURL: currentAuthUser.photoURL || undefined,
+    createdAt: currentSession?.createdAt || new Date().toISOString(),
+    isAdmin,
+    ...currentSession,
+  };
+
+  saveCachedSession(updatedProfile);
+  return updatedProfile;
+}
+
+export async function updateUserAvatar(photoURL: string): Promise<UserProfile> {
+  const currentAuthUser = auth?.currentUser;
+  if (!currentAuthUser) {
+    throw new Error('Utilisateur non connecté.');
+  }
+
+  await updateProfile(currentAuthUser, { photoURL });
+
+  if (db && isFirebaseConfigured()) {
+    await updateDoc(doc(db, 'users', currentAuthUser.uid), {
+      photoURL,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  const currentSession = getCachedSession();
+  const updatedProfile: UserProfile = {
+    uid: currentAuthUser.uid,
+    email: currentAuthUser.email || '',
+    displayName: currentAuthUser.displayName || 'Utilisateur',
+    photoURL,
+    createdAt: currentSession?.createdAt || new Date().toISOString(),
+    isAdmin: checkIsAdmin(currentAuthUser),
+    ...currentSession,
+  };
+
+  saveCachedSession(updatedProfile);
+  return updatedProfile;
+}
+
+export function formatFileSize(bytes?: number): string {
+  if (!bytes || bytes === 0) return '0 Mo';
+  const k = 1024;
+  const sizes = ['Octets', 'Ko', 'Mo', 'Go'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+export async function updateUserProfile(
+  uid: string,
+  updates: Partial<UserProfile>
+): Promise<UserProfile> {
+  const currentAuthUser = auth?.currentUser;
+  if (!currentAuthUser && !uid) {
+    throw new Error('Utilisateur non connecté.');
+  }
+
+  const effectiveUid = uid || currentAuthUser?.uid || '';
+  const now = new Date().toISOString();
+
+  if (currentAuthUser && updates.displayName) {
+    await updateProfile(currentAuthUser, {
+      displayName: updates.displayName,
+      ...(updates.photoURL ? { photoURL: updates.photoURL } : {})
+    });
+  }
+
+  if (db && isFirebaseConfigured() && effectiveUid) {
+    await updateDoc(doc(db, 'users', effectiveUid), sanitizeForFirestore({
+      ...updates,
+      updatedAt: now,
+    }));
+  }
+
+  const currentSession = getCachedSession();
+  const updatedProfile: UserProfile = {
+    uid: effectiveUid,
+    email: currentAuthUser?.email || currentSession?.email || '',
+    displayName: updates.displayName || currentSession?.displayName || 'Utilisateur',
+    photoURL: updates.photoURL || currentSession?.photoURL,
+    bio: updates.bio !== undefined ? updates.bio : currentSession?.bio,
+    createdAt: currentSession?.createdAt || now,
+    isAdmin: currentSession?.isAdmin || false,
+    ...currentSession,
+    ...updates,
+  };
+
+  saveCachedSession(updatedProfile);
+  return updatedProfile;
+}
+
+export function onAuthChange(callback: (user: UserProfile | null) => void): () => void {
+  const cached = getCachedSession();
+  if (cached) {
+    callback(cached);
+  }
+
+  if (auth && isFirebaseConfigured()) {
+    return onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        const userEmail = fbUser.email || '';
+        const isAdmin = checkIsAdmin({ email: userEmail, uid: fbUser.uid });
+        const defaultPhotoURL = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(fbUser.displayName || userEmail || 'user')}`;
+
+        let profile: UserProfile = {
+          uid: fbUser.uid,
+          email: userEmail,
+          displayName: fbUser.displayName || userEmail.split('@')[0] || 'Utilisateur',
+          photoURL: fbUser.photoURL || defaultPhotoURL,
+          createdAt: new Date().toISOString(),
+          isAdmin,
+          favorites: [],
+          following: [],
+          publishedTrophies: [],
+          trophiesPrivacy: 'public',
+        };
+
+        if (db) {
+          try {
+            const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
+            if (auth?.currentUser?.uid !== fbUser.uid) return;
+            if (userDoc.exists()) {
+              const userData = userDoc.data() as UserProfile;
+              profile = { ...profile, ...userData, isAdmin, uid: fbUser.uid };
+            } else {
+              await setDoc(doc(db, 'users', fbUser.uid), sanitizeForFirestore(profile), { merge: true });
+            }
+          } catch {}
+        }
+        profile.isAdmin = isAdmin;
+
+        saveCachedSession(profile);
+        callback(profile);
+      } else {
+        clearUserPrivateCache();
+        callback(null);
+      }
+    });
+  }
+
+  if (!cached) {
+    callback(null);
+  }
+  return () => {};
+}
+
+export const subscribeToAuth = onAuthChange;
+export const logoutUser = logOut;
+
+// --------------------------------------------------------------------------
+// POPULARITY ALGORITHM
+// --------------------------------------------------------------------------
+export function calculatePopularityScore(project: Project): number {
+  const downloads = project.downloads || 0;
+  const views = project.views || 0;
+  const createdTime = new Date(project.createdAt || Date.now()).getTime();
+  const daysSinceCreation = Math.max(0, (Date.now() - createdTime) / (1000 * 60 * 60 * 24));
+  const recencyFactor = Math.max(0.3, 1 / (1 + daysSinceCreation * 0.03));
+  const baseScore = (downloads * 3 + views * 1) * recencyFactor;
+  const featuredBonus = project.featured ? 25 : 0;
+  return Math.round(baseScore + featuredBonus);
+}
+
+// --------------------------------------------------------------------------
+// FIRESTORE CLOUD PROJECT SERVICES (100% Cloud Authoritative)
+// --------------------------------------------------------------------------
 const DEMO_PROJECT_IDS = new Set([
   'orax-bot-v2',
   'cyber-shield-scanner',
@@ -284,503 +634,7 @@ export function deduplicateProjects(projects: Project[]): Project[] {
   return unique;
 }
 
-function getLocalProjects(): Project[] {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_PROJECTS);
-    if (saved) {
-      const parsed: Project[] = JSON.parse(saved);
-      const unique = deduplicateProjects(parsed);
-      if (unique.length !== parsed.length) {
-        localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(unique));
-      }
-      return unique;
-    }
-  } catch {
-    // Ignore storage parse error
-  }
-  return [];
-}
-
-function saveLocalProjects(projects: Project[]): void {
-  const unique = deduplicateProjects(projects);
-  localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(unique));
-}
-
-function getLocalReports(): ProjectReport[] {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_REPORTS);
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch {
-    // Ignore
-  }
-  return [];
-}
-
-function saveLocalReports(reports: ProjectReport[]): void {
-  localStorage.setItem(STORAGE_KEY_REPORTS, JSON.stringify(reports));
-}
-
-export function clearUserPrivateCache(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY_SESSION_UI);
-    localStorage.removeItem(FOLLOWING_CACHE_KEY);
-    localStorage.removeItem(FAVORITES_CACHE_KEY);
-  } catch {
-    // Ignore storage clear error
-  }
-}
-
-function getCachedSession(): UserProfile | null {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_SESSION_UI);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      parsed.isAdmin = checkIsAdmin(parsed);
-      return parsed;
-    }
-  } catch {
-    // Ignore
-  }
-  return null;
-}
-
-function saveCachedSession(user: UserProfile | null): void {
-  if (user) {
-    user.isAdmin = checkIsAdmin(user);
-    localStorage.setItem(STORAGE_KEY_SESSION_UI, JSON.stringify(user));
-  } else {
-    clearUserPrivateCache();
-  }
-}
-
-// --------------------------------------------------------------------------
-// AUTHENTICATION & FIRESTORE ERROR HANDLING (Differentiates all error classes)
-// --------------------------------------------------------------------------
-
-export function translateFirebaseError(error: any): string {
-  if (!isFirebaseConfigured()) {
-    return 'Configuration Firebase absente. Veuillez définir les variables d\'environnement VITE_FIREBASE_* sur Netlify ou dans votre fichier .env.';
-  }
-
-  const code = error?.code || '';
-  const message = error?.message || '';
-
-  // 1. Authentication specific errors
-  switch (code) {
-    case 'auth/email-already-in-use':
-      return 'Cette adresse e-mail est déjà associée à un compte existant.';
-    case 'auth/invalid-email':
-      return 'L\'adresse e-mail saisie n\'est pas valide.';
-    case 'auth/user-not-found':
-      return 'Aucun compte associé à cette adresse e-mail.';
-    case 'auth/wrong-password':
-    case 'auth/invalid-credential':
-      return 'Identifiants incorrects (e-mail ou mot de passe invalide).';
-    case 'auth/weak-password':
-      return 'Le mot de passe doit comporter au moins 6 caractères.';
-    case 'auth/too-many-requests':
-      return 'Trop de tentatives infructueuses. Le compte est temporairement bloqué par sécurité. Veuillez patienter avant de réessayer.';
-    case 'auth/network-request-failed':
-      return 'Impossible de joindre les serveurs d\'authentification Firebase (erreur réseau). Vérifiez votre connexion internet.';
-    case 'auth/user-disabled':
-      return 'Ce compte utilisateur a été désactivé par l\'administrateur.';
-    case 'auth/unauthorized-domain':
-      return 'Domaine web non autorisé dans Firebase Auth. Ajoutez votre nom de domaine de déploiement (Netlify) dans Firebase Console > Authentication > Settings > Authorized domains.';
-    case 'auth/operation-not-allowed':
-      return 'L\'authentification par e-mail/mot de passe n\'est pas activée dans votre console Firebase.';
-    case 'auth/requires-recent-login':
-      return 'Cette action sensible nécessite une reconnexion récente. Veuillez vous reconnecter.';
-    case 'auth/expired-action-code':
-      return 'Le lien de réinitialisation a expiré. Veuillez refaire une demande.';
-    case 'auth/invalid-action-code':
-      return 'Le lien de réinitialisation est invalide ou a déjà été utilisé.';
-    
-    // 2. Firestore & Security Rules errors
-    case 'permission-denied':
-      return 'Accès refusé par les règles de sécurité Firestore (permissions insuffisantes pour cette opération).';
-    case 'unavailable':
-      return 'Le service Firestore est temporairement inaccessible. Les données sont lues depuis le cache local.';
-    case 'deadline-exceeded':
-      return 'Délai d\'attente dépassé lors de la requête Firestore. Vérifiez la stabilité de votre réseau.';
-    case 'not-found':
-      return 'Le document demandé est introuvable sur Firestore.';
-    case 'already-exists':
-      return 'Ce document existe déjà dans Firestore.';
-    case 'resource-exhausted':
-      return 'Quota Firebase Firestore dépassé. Veuillez contacter l\'administrateur.';
-    case 'failed-precondition':
-      return 'Condition préalable Firestore non remplie ou index composite manquant.';
-    case 'aborted':
-      return 'La transaction Firestore a été annulée suite à un conflit d\'écriture concurrentielle.';
-    case 'unauthenticated':
-      return 'Vous devez être authentifié pour effectuer cette opération sur Firestore.';
-  }
-
-  // Network offline or CORS catch
-  if (message.toLowerCase().includes('failed to fetch') || message.toLowerCase().includes('networkerror')) {
-    return 'Erreur de connexion réseau avec Firebase. Vérifiez votre connexion internet.';
-  }
-
-  return message || 'Une erreur est survenue lors de l\'opération Firebase.';
-}
-
-export async function registerUser(
-  email: string, 
-  password: string, 
-  displayName: string,
-  customPhotoURL?: string
-): Promise<UserProfile> {
-  if (!auth || !isFirebaseConfigured()) {
-    throw new Error('Configuration Firebase absente. Impossible de créer un compte sans les variables VITE_FIREBASE_*.');
-  }
-
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanDisplayName = displayName.trim() || cleanEmail.split('@')[0];
-  const finalPhotoURL = customPhotoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanDisplayName || cleanEmail)}`;
-  const isAdmin = ADMIN_EMAILS.has(cleanEmail);
-
-  if (!isAdmin) {
-    const lowerName = cleanDisplayName.toLowerCase();
-    if (lowerName.includes('lord demon') || lowerName.includes('lorddemon') || lowerName === 'admin' || lowerName.includes('fondateur orax')) {
-      throw new Error('Le nom "Lord Demon" ou "Admin" est réservé exclusivement au fondateur et administrateur officiel ORAX.');
-    }
-  }
-
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-    
-    const userProfile: UserProfile = {
-      uid: cred.user.uid,
-      email: cred.user.email || cleanEmail,
-      displayName: cleanDisplayName,
-      photoURL: finalPhotoURL,
-      createdAt: new Date().toISOString(),
-      projectsCount: 0,
-      totalDownloads: 0,
-      isAdmin,
-    };
-
-    // Concurrently trigger Auth profile update and Firestore document creation
-    try {
-      await updateProfile(cred.user, { 
-        displayName: cleanDisplayName,
-        photoURL: finalPhotoURL
-      });
-    } catch (profileErr) {
-      console.warn('Profile update notice:', profileErr);
-    }
-
-    if (db && isFirebaseConfigured()) {
-      try {
-        await setDoc(doc(db, 'users', cred.user.uid), sanitizeForFirestore(userProfile));
-      } catch (dbErr) {
-        console.warn('Firestore user profile document creation error:', dbErr);
-      }
-    }
-
-    // Save session in local cache
-    saveCachedSession(userProfile);
-
-    return userProfile;
-  } catch (err: any) {
-    throw new Error(translateFirebaseError(err));
-  }
-}
-
-export async function loginUser(email: string, password: string): Promise<UserProfile> {
-  if (!auth || !isFirebaseConfigured()) {
-    throw new Error('Configuration Firebase absente. Impossible de se connecter sans les variables VITE_FIREBASE_*.');
-  }
-
-  const cleanEmail = email.trim().toLowerCase();
-  const defaultPhotoURL = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanEmail)}`;
-  const isAdmin = ADMIN_EMAILS.has(cleanEmail);
-
-  try {
-    const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
-    let userProfile: UserProfile = {
-      uid: cred.user.uid,
-      email: cred.user.email || cleanEmail,
-      displayName: cred.user.displayName || cleanEmail.split('@')[0],
-      photoURL: cred.user.photoURL || defaultPhotoURL,
-      createdAt: new Date().toISOString(),
-      projectsCount: 0,
-      totalDownloads: 0,
-      isAdmin,
-    };
-
-    userProfile.isAdmin = checkIsAdmin(userProfile);
-
-    // Fetch full Firestore profile as Source of Truth
-    if (db && isFirebaseConfigured()) {
-      try {
-        const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
-        if (userDoc && userDoc.exists()) {
-          const freshData = userDoc.data() as UserProfile;
-          userProfile = { ...userProfile, ...freshData, isAdmin, uid: cred.user.uid };
-        } else {
-          await setDoc(doc(db, 'users', cred.user.uid), sanitizeForFirestore(userProfile));
-        }
-      } catch (err) {
-        console.warn('Firestore user profile lookup warning:', err);
-      }
-    }
-    
-    if (userProfile.favorites) {
-      saveLocalFavorites(userProfile.favorites);
-    } else {
-      saveLocalFavorites([]);
-    }
-    if (userProfile.following) {
-      saveLocalFollowing(userProfile.following);
-    } else {
-      saveLocalFollowing([]);
-    }
-
-    saveCachedSession(userProfile);
-    return userProfile;
-  } catch (err: any) {
-    throw new Error(translateFirebaseError(err));
-  }
-}
-
-export async function updateUserProfile(
-  userId: string, 
-  updates: Partial<UserProfile>
-): Promise<UserProfile> {
-  const authUser = auth?.currentUser;
-  const currentSession = getCachedSession();
-
-  const effectiveUid = authUser?.uid || currentSession?.uid || userId;
-  const effectiveEmail = authUser?.email || currentSession?.email || '';
-  const isAdmin = checkIsAdmin({ email: effectiveEmail, uid: effectiveUid, isAdmin: currentSession?.isAdmin });
-  const isAuthorized = (effectiveUid === userId) || (authUser?.uid === userId) || (currentSession?.uid === userId) || isAdmin;
-
-  if (!isAuthorized) {
-    throw new Error('Vous n\'êtes pas autorisé à modifier ce profil.');
-  }
-
-  // Security: Prevent privilege escalation and immutable UID modification
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { isAdmin: _attemptedAdmin, uid: _ignoredUid, isCertified: _ignoredCert, ...safeUpdates } = updates as any;
-
-  // Anti-spoofing: Reserve Founder and Admin titles for verified admins only
-  if (safeUpdates.displayName && !isAdmin) {
-    const cleanName = safeUpdates.displayName.trim().toLowerCase();
-    if (cleanName.includes('lord demon') || cleanName.includes('lorddemon') || cleanName === 'admin' || cleanName.includes('fondateur orax')) {
-      throw new Error('Le nom "Lord Demon" ou "Admin" est réservé exclusivement au fondateur et administrateur officiel ORAX.');
-    }
-  }
-
-  const updatedProfile: UserProfile = {
-    ...(currentSession || {
-      uid: userId,
-      email: effectiveEmail,
-      displayName: authUser?.displayName || 'Dev',
-      createdAt: new Date().toISOString(),
-    }),
-    ...safeUpdates,
-    uid: userId,
-    isAdmin: isAdmin || Boolean(currentSession?.isAdmin),
-  };
-
-  // Immediate local cache write for instant UI feedback (0ms latency)
-  if (updatedProfile.favorites) {
-    saveLocalFavorites(updatedProfile.favorites);
-  }
-  if (updatedProfile.following) {
-    saveLocalFollowing(updatedProfile.following);
-  }
-  saveCachedSession(updatedProfile);
-
-  // Parallel asynchronous remote updates to avoid blocking sequential HTTP requests
-  const networkTasks: Promise<any>[] = [];
-
-  // 1. Firebase Auth profile update
-  if (authUser && (authUser.uid === userId || isAdmin)) {
-    const authUpdates: { displayName?: string; photoURL?: string } = {};
-    if (safeUpdates.displayName) authUpdates.displayName = safeUpdates.displayName;
-    if (safeUpdates.photoURL !== undefined) authUpdates.photoURL = safeUpdates.photoURL;
-    if (Object.keys(authUpdates).length > 0) {
-      networkTasks.push(
-        updateProfile(authUser, authUpdates).catch((err) => {
-          console.warn('Firebase Auth updateProfile async warning:', err);
-        })
-      );
-    }
-  }
-
-  // 2. Firestore Document Update
-  if (db && isFirebaseConfigured()) {
-    const payload: Record<string, any> = {
-      ...sanitizeForFirestore(safeUpdates),
-      uid: userId,
-      updatedAt: new Date().toISOString(),
-    };
-    if (currentSession?.createdAt) {
-      payload.createdAt = currentSession.createdAt;
-    }
-
-    const firestorePromise = setDoc(doc(db, 'users', userId), payload, { merge: true })
-      .catch(async (err: any) => {
-        console.warn('Firestore user profile update warning, trying shallow update:', err);
-        try {
-          await updateDoc(doc(db, 'users', userId), sanitizeForFirestore(safeUpdates));
-        } catch (fallbackErr: any) {
-          console.warn('Firestore user profile fallback update error:', fallbackErr);
-        }
-      });
-
-    networkTasks.push(firestorePromise);
-  }
-
-  // Await network tasks with a fast timeout safety guarantee (max 1.5s)
-  if (networkTasks.length > 0) {
-    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
-    await Promise.race([
-      Promise.allSettled(networkTasks),
-      timeoutPromise
-    ]);
-  }
-
-  return updatedProfile;
-}
-
-export async function logoutUser(): Promise<void> {
-  if (auth && isFirebaseConfigured()) {
-    try {
-      await signOut(auth);
-    } catch {
-      // Ignore
-    }
-  }
-  clearUserPrivateCache();
-}
-
-export async function resetUserPassword(email: string): Promise<void> {
-  if (!auth || !isFirebaseConfigured()) {
-    throw new Error('Configuration Firebase absente. Impossible d\'envoyer l\'e-mail de réinitialisation sans les variables VITE_FIREBASE_*.');
-  }
-
-  const cleanEmail = email.trim().toLowerCase();
-  try {
-    await sendPasswordResetEmail(auth, cleanEmail);
-  } catch (err: any) {
-    throw new Error(translateFirebaseError(err));
-  }
-}
-
-export function subscribeToAuth(callback: (user: UserProfile | null) => void): () => void {
-  // First paint with cached session for UX responsiveness
-  const cached = getCachedSession();
-  if (cached) {
-    callback(cached);
-  }
-
-  if (auth && isFirebaseConfigured()) {
-    return onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
-      if (fbUser) {
-        const defaultPhotoURL = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(fbUser.displayName || fbUser.email || 'dev')}`;
-        
-        let hasCustomAdminClaim = false;
-        try {
-          const tokenResult = await fbUser.getIdTokenResult();
-          hasCustomAdminClaim = tokenResult.claims.admin === true;
-        } catch {
-          // Non-blocking token error
-        }
-
-        const userEmail = (fbUser.email || '').toLowerCase();
-        const isAdmin = checkIsAdmin({ email: userEmail, uid: fbUser.uid }, hasCustomAdminClaim);
-
-        let profile: UserProfile = {
-          uid: fbUser.uid,
-          email: userEmail,
-          displayName: fbUser.displayName || userEmail.split('@')[0] || 'Utilisateur',
-          photoURL: fbUser.photoURL || defaultPhotoURL,
-          createdAt: new Date().toISOString(),
-          isAdmin,
-        };
-
-        if (db) {
-          try {
-            const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
-            // Check race condition: ignore if another auth state change occurred during the fetch
-            if (auth?.currentUser?.uid !== fbUser.uid) {
-              return;
-            }
-            if (userDoc.exists()) {
-              const userData = userDoc.data() as UserProfile;
-              profile = { 
-                ...profile, 
-                ...userData,
-                isAdmin,
-                uid: fbUser.uid,
-              };
-            } else {
-              await setDoc(doc(db, 'users', fbUser.uid), sanitizeForFirestore(profile), { merge: true });
-            }
-          } catch {
-            // fallback to auth profile
-          }
-        }
-        profile.isAdmin = isAdmin;
-
-        // Isolate and load user private favorites/following
-        if (profile.favorites) {
-          saveLocalFavorites(profile.favorites);
-        } else {
-          saveLocalFavorites([]);
-        }
-        if (profile.following) {
-          saveLocalFollowing(profile.following);
-        } else {
-          saveLocalFollowing([]);
-        }
-
-        saveCachedSession(profile);
-        callback(profile);
-      } else {
-        clearUserPrivateCache();
-        callback(null);
-      }
-    });
-  }
-
-  callback(null);
-  return () => {};
-}
-
-// --------------------------------------------------------------------------
-// POPULARITY ALGORITHM
-// --------------------------------------------------------------------------
-
-/**
- * Calculates a balanced popularity score based on downloads (x3), views (x1),
- * and recency decay so new active projects can trend without being permanently locked behind historical numbers.
- */
-export function calculatePopularityScore(project: Project): number {
-  const downloads = project.downloads || 0;
-  const views = project.views || 0;
-  const createdTime = new Date(project.createdAt || Date.now()).getTime();
-  const daysSinceCreation = Math.max(0, (Date.now() - createdTime) / (1000 * 60 * 60 * 24));
-  
-  // Recency decay factor (newer projects have multiplier up to 1.0, older projects decay gradually to 0.3)
-  const recencyFactor = Math.max(0.3, 1 / (1 + daysSinceCreation * 0.03));
-  const baseScore = (downloads * 3 + views * 1) * recencyFactor;
-  const featuredBonus = project.featured ? 25 : 0;
-  
-  return Math.round(baseScore + featuredBonus);
-}
-
-// --------------------------------------------------------------------------
-// FIRESTORE & PROJECT SERVICES
-// --------------------------------------------------------------------------
-
 const PROJECTS_CHANGE_EVENT = 'orax_projects_changed';
-
 export function broadcastProjectsChange(projects: Project[]): void {
   if (typeof window !== 'undefined') {
     const unique = deduplicateProjects(projects);
@@ -794,9 +648,6 @@ export interface SubscribeProjectsOptions {
   limitCount?: number;
 }
 
-/**
- * Generate normalized lowercase search tokens for full-text indexing in Firestore
- */
 export function generateSearchTokens(data: {
   name?: string;
   description?: string;
@@ -819,7 +670,6 @@ export function generateSearchTokens(data: {
     const words = clean.split(/\s+/).filter(w => w.length >= 2);
     for (const word of words) {
       tokenSet.add(word);
-      // For short keywords (up to 8 chars), also add prefixes (min 2 chars) for instant autocomplete
       if (word.length >= 2 && word.length <= 8) {
         for (let i = 2; i <= word.length; i++) {
           tokenSet.add(word.substring(0, i));
@@ -831,86 +681,63 @@ export function generateSearchTokens(data: {
   addTokensFromText(data.name);
   addTokensFromText(data.developerName);
   addTokensFromText(data.category);
-  if (data.technologies) {
-    data.technologies.forEach(t => addTokensFromText(t));
-  }
-  if (data.tags) {
-    data.tags.forEach(t => addTokensFromText(t));
-  }
-  if (data.shortDescription) {
-    addTokensFromText(data.shortDescription);
-  }
+  if (data.technologies) data.technologies.forEach(t => addTokensFromText(t));
+  if (data.tags) data.tags.forEach(t => addTokensFromText(t));
+  if (data.shortDescription) addTokensFromText(data.shortDescription);
 
-  // Cap at 80 tokens to remain well under Firestore document index limits
   return Array.from(tokenSet).slice(0, 80);
 }
 
 /**
- * Real-time subscription to projects:
+ * Real-time subscription to cloud projects.
  * Firestore onSnapshot is the sole, authoritative source of truth.
- * Non-admins receive strictly `status == 'published'`.
- * Admins receive all project statuses for full administration and moderation.
- * Bounded by limit to prevent downloading excessive documents into memory.
  */
 export function subscribeToProjects(
   callback: (projects: Project[]) => void,
   options: SubscribeProjectsOptions = {}
 ): () => void {
-  const maxLimit = options.limitCount || 60;
+  const maxLimit = options.limitCount || 100;
 
-  // 1. Immediately provide cached/local data filtered appropriately
-  const initial = getLocalProjects();
-  const initialFiltered = options.isAdmin
-    ? initial
-    : initial.filter(p => p.status === 'published' || (options.userId && p.ownerId === options.userId));
-  callback(initialFiltered.slice(0, maxLimit));
+  if (!db || !isFirebaseConfigured()) {
+    updateSyncStatus('offline');
+    callback([]);
+    return () => {};
+  }
 
   let unsubscribeFirestore: (() => void) | null = null;
 
-  // 2. Attach authoritative live Firestore listener
-  if (db && isFirebaseConfigured()) {
-    try {
-      updateSyncStatus(navigator.onLine ? 'connecting' : 'offline');
+  try {
+    updateSyncStatus(navigator.onLine ? 'connecting' : 'offline');
 
-      // Admin queries all projects; Public users query strictly published projects
-      const q = options.isAdmin
-        ? query(collection(db, 'projects'), orderBy('createdAt', 'desc'), limit(maxLimit))
-        : query(
-            collection(db, 'projects'),
-            where('status', '==', 'published'),
-            orderBy('createdAt', 'desc'),
-            limit(maxLimit)
-          );
+    const q = options.isAdmin
+      ? query(collection(db, 'projects'), orderBy('createdAt', 'desc'), limit(maxLimit))
+      : query(
+          collection(db, 'projects'),
+          where('status', '==', 'published'),
+          orderBy('createdAt', 'desc'),
+          limit(maxLimit)
+        );
 
-      unsubscribeFirestore = onSnapshot(
-        q,
-        (snapshot) => {
-          if (snapshot) {
-            const fetched = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Project));
-            const realOnly = deduplicateProjects(fetched);
-            // Authoritative Firestore synchronization:
-            // - Updates local cache with Firestore truth
-            saveLocalProjects(realOnly);
-            updateSyncStatus('synced');
-            callback(realOnly);
-          }
-        },
-        (err) => {
-          console.warn('Firestore real-time snapshot notice:', err);
-          updateSyncStatus(navigator.onLine ? 'error' : 'offline');
-          // On error, supply cached data
-          const fallback = getLocalProjects().filter(p => 
-            options.isAdmin ? true : (p.status === 'published' || (options.userId && p.ownerId === options.userId))
-          );
-          callback(fallback.slice(0, maxLimit));
+    unsubscribeFirestore = onSnapshot(
+      q,
+      (snapshot) => {
+        if (snapshot) {
+          const fetched = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Project));
+          const realOnly = deduplicateProjects(fetched);
+          updateSyncStatus('synced');
+          callback(realOnly);
         }
-      );
-    } catch (err) {
-      console.warn('Firestore onSnapshot init error:', err);
-      updateSyncStatus(navigator.onLine ? 'error' : 'offline');
-    }
-  } else {
-    updateSyncStatus('offline');
+      },
+      (err) => {
+        console.warn('Firestore real-time snapshot notice:', err);
+        updateSyncStatus(navigator.onLine ? 'error' : 'offline');
+        callback([]);
+      }
+    );
+  } catch (err) {
+    console.warn('Firestore onSnapshot init error:', err);
+    updateSyncStatus(navigator.onLine ? 'error' : 'offline');
+    callback([]);
   }
 
   return () => {
@@ -923,9 +750,7 @@ export function subscribeToProjects(
 export async function getProjects(options: SubscribeProjectsOptions = {}): Promise<Project[]> {
   if (!db || !isFirebaseConfigured()) {
     updateSyncStatus('offline');
-    return getLocalProjects().filter(p => 
-      options.isAdmin ? true : (p.status === 'published' || (options.userId && p.ownerId === options.userId))
-    );
+    return [];
   }
 
   try {
@@ -942,18 +767,15 @@ export async function getProjects(options: SubscribeProjectsOptions = {}): Promi
     if (snapshot) {
       const fetched = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Project));
       const realOnly = deduplicateProjects(fetched);
-      saveLocalProjects(realOnly);
       updateSyncStatus('synced');
       return realOnly;
     }
   } catch (err) {
     updateSyncStatus(navigator.onLine ? 'error' : 'offline');
-    console.warn('Firestore getProjects network notice, using local cache:', err);
+    console.warn('Firestore getProjects network notice:', err);
   }
 
-  return getLocalProjects().filter(p => 
-    options.isAdmin ? true : (p.status === 'published' || (options.userId && p.ownerId === options.userId))
-  );
+  return [];
 }
 
 export interface FetchPaginatedOptions {
@@ -964,10 +786,6 @@ export interface FetchPaginatedOptions {
   userId?: string;
 }
 
-/**
- * Server-side Firestore pagination with cursor (startAfter) and compound filters.
- * Capable of scaling effortlessly from 1,000 to 100,000+ projects without downloading full collections.
- */
 export async function getPaginatedProjects(
   options: FetchPaginatedOptions = {}
 ): Promise<PaginatedProjectsResult> {
@@ -976,70 +794,18 @@ export async function getPaginatedProjects(
     lastDoc = null,
     filters = {},
     isAdmin = false,
-    userId = '',
   } = options;
 
   const normalize = (str: string) =>
     str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
   if (!db || !isFirebaseConfigured()) {
-    // Client-side fallback pagination over local cache
     updateSyncStatus('offline');
-    const all = getLocalProjects().filter(p => {
-      if (isAdmin) return true;
-      if (p.status === 'hidden' || p.status === 'pending' || p.status === 'rejected') {
-        return userId && (p.ownerId === userId || userId === 'dev_lord_demon');
-      }
-      return p.status === 'published' || !p.status;
-    });
-
-    let filtered = [...all];
-    if (filters.category && filters.category !== 'all') {
-      filtered = filtered.filter(p => p.category === filters.category);
-    }
-    if (filters.technology && filters.technology !== 'all') {
-      const techLower = filters.technology.toLowerCase();
-      filtered = filtered.filter(p => p.technologies.some(t => t.toLowerCase() === techLower));
-    }
-    if (filters.tag && filters.tag !== 'all') {
-      const tagLower = filters.tag.toLowerCase();
-      filtered = filtered.filter(p => p.tags.some(t => t.toLowerCase() === tagLower));
-    }
-    if (filters.search && filters.search.trim()) {
-      const tokens = normalize(filters.search).split(/\s+/).filter(Boolean);
-      filtered = filtered.filter(p => {
-        const haystack = normalize(
-          `${p.name} ${p.developerName} ${p.shortDescription || ''} ${p.description} ${p.category} ${p.technologies.join(' ')} ${p.tags.join(' ')}`
-        );
-        return tokens.every(tok => haystack.includes(tok));
-      });
-    }
-
-    filtered.sort((a, b) => {
-      switch (filters.sortBy) {
-        case 'downloads':
-          return (b.downloads || 0) - (a.downloads || 0);
-        case 'popular':
-          return ((b.downloads || 0) * 3 + (b.views || 0)) - ((a.downloads || 0) * 3 + (a.views || 0));
-        case 'rating':
-          return (b.rating || 0) !== (a.rating || 0)
-            ? (b.rating || 0) - (a.rating || 0)
-            : (b.ratingsCount || 0) - (a.ratingsCount || 0);
-        case 'oldest':
-          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-        case 'alpha':
-          return a.name.localeCompare(b.name);
-        case 'recent':
-        default:
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      }
-    });
-
     return {
-      projects: filtered.slice(0, pageSize),
-      hasMore: filtered.length > pageSize,
+      projects: [],
+      hasMore: false,
       lastDocSnapshot: null,
-      totalEstimate: filtered.length
+      totalEstimate: 0,
     };
   }
 
@@ -1048,17 +814,14 @@ export async function getPaginatedProjects(
     const projectsCol = collection(db, 'projects');
     const queryConstraints: any[] = [];
 
-    // 1. Status Filter: Public users receive strictly 'published'
     if (!isAdmin) {
       queryConstraints.push(where('status', '==', 'published'));
     }
 
-    // 2. Category Filter at Firestore query level
     if (filters.category && filters.category !== 'all') {
       queryConstraints.push(where('category', '==', filters.category));
     }
 
-    // 3. Array-contains Filter (Firestore supports max 1 array-contains per query)
     let appliedArrayFilter = false;
     const cleanSearch = filters.search?.trim();
 
@@ -1074,7 +837,6 @@ export async function getPaginatedProjects(
       appliedArrayFilter = true;
     }
 
-    // 4. Sorting & Order Constraints
     switch (filters.sortBy) {
       case 'downloads':
         queryConstraints.push(orderBy('downloads', 'desc'));
@@ -1103,12 +865,10 @@ export async function getPaginatedProjects(
         break;
     }
 
-    // 5. Cursor Pagination (startAfter previous DocumentSnapshot)
     if (lastDoc) {
       queryConstraints.push(startAfter(lastDoc));
     }
 
-    // 6. Page Size Limit (fetch +1 to determine hasMore cleanly)
     queryConstraints.push(limit(pageSize + 1));
 
     const q = query(projectsCol, ...queryConstraints);
@@ -1122,7 +882,6 @@ export async function getPaginatedProjects(
     let pageProjects = validDocs.map(d => ({ id: d.id, ...d.data() } as Project));
     pageProjects = deduplicateProjects(pageProjects);
 
-    // Apply secondary filters in-memory if multiple array filters or multi-word search were used
     if (filters.technology && filters.technology !== 'all' && !appliedArrayFilter) {
       const techLower = filters.technology.toLowerCase();
       pageProjects = pageProjects.filter(p => p.technologies.some(t => t.toLowerCase() === techLower));
@@ -1150,13 +909,10 @@ export async function getPaginatedProjects(
     };
   } catch (err: any) {
     updateSyncStatus(navigator.onLine ? 'error' : 'offline');
-    console.warn('Firestore getPaginatedProjects network notice, using local cache:', err);
-    
-    // Graceful fallback to local cache
-    const fallbackProjects = getLocalProjects();
+    console.warn('Firestore getPaginatedProjects network notice:', err);
     return {
-      projects: fallbackProjects.slice(0, pageSize),
-      hasMore: fallbackProjects.length > pageSize,
+      projects: [],
+      hasMore: false,
       lastDocSnapshot: null
     };
   }
@@ -1171,30 +927,18 @@ export async function getProjectById(id: string): Promise<Project | null> {
         return { id: snapshot.id, ...snapshot.data() } as Project;
       }
     } catch (err) {
-      console.warn('Firestore getProjectById notice, using cache:', err);
+      console.warn('Firestore getProjectById notice:', err);
     }
   }
-
-  const projects = getLocalProjects();
-  return projects.find(p => p.id === id) || null;
+  return null;
 }
 
-/**
- * Real-time listener for a single project document.
- * Ensures instant multi-user synchronization when a project is viewed in detail.
- */
 export function subscribeToProjectById(
   projectId: string,
   callback: (project: Project | null) => void
 ): () => void {
-  // 1. Immediately provide local cached version if available
-  const cachedProjects = getLocalProjects();
-  const initial = cachedProjects.find(p => p.id === projectId) || null;
-  if (initial) {
-    callback(initial);
-  }
-
   if (!db || !isFirebaseConfigured() || !projectId) {
+    callback(null);
     return () => {};
   }
 
@@ -1205,34 +949,24 @@ export function subscribeToProjectById(
       (snapshot) => {
         if (snapshot && snapshot.exists()) {
           const live = { id: snapshot.id, ...snapshot.data() } as Project;
-          // Synchronize local cache with Firestore truth
-          const projects = getLocalProjects();
-          const idx = projects.findIndex(p => p.id === projectId);
-          if (idx !== -1) {
-            projects[idx] = live;
-          } else {
-            projects.unshift(live);
-          }
-          const clean = deduplicateProjects(projects);
-          saveLocalProjects(clean);
-          broadcastProjectsChange(clean);
           callback(live);
-        } else if (snapshot && !snapshot.exists()) {
+        } else {
           callback(null);
         }
       },
       (err) => {
         console.warn('Firestore subscribeToProjectById notice:', err);
+        callback(null);
       }
     );
     return unsubscribe;
   } catch (err) {
     console.warn('Firestore subscribeToProjectById init error:', err);
+    callback(null);
     return () => {};
   }
 }
 
-// Helper to generate a clean URL slug from project name
 export function generateProjectSlug(name: string, id: string): string {
   const cleanName = name
     .toLowerCase()
@@ -1245,26 +979,26 @@ export function generateProjectSlug(name: string, id: string): string {
 }
 
 export async function saveNewProject(projectData: Omit<Project, 'id' | 'createdAt' | 'updatedAt' | 'downloads' | 'views'>): Promise<Project> {
+  if (!db || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase manquante : Impossible de publier sans les variables VITE_FIREBASE_* configurées.');
+  }
+
   const currentAuthUser = auth?.currentUser;
-  if (!currentAuthUser && isFirebaseConfigured()) {
-    throw new Error('Vous devez être authentifié avec votre compte pour publier un projet.');
+  if (!currentAuthUser) {
+    throw new Error('Vous devez être authentifié avec votre compte pour publier un projet dans le Cloud.');
   }
 
-  const verifiedOwnerId = currentAuthUser?.uid || projectData.ownerId;
-  if (!verifiedOwnerId) {
-    throw new Error('Vous devez être authentifié pour publier un projet (UID manquant).');
-  }
-
+  const verifiedOwnerId = currentAuthUser.uid;
   const newId = `orax_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date().toISOString();
   const slug = generateProjectSlug(projectData.name, newId);
-  const isAdmin = checkIsAdmin({ email: currentAuthUser?.email || '', uid: verifiedOwnerId });
+  const isAdmin = checkIsAdmin({ email: currentAuthUser.email || '', uid: verifiedOwnerId });
 
-  let developerName = (projectData.developerName || currentAuthUser?.displayName || 'Développeur').trim();
+  let developerName = (projectData.developerName || currentAuthUser.displayName || 'Développeur').trim();
   if (!isAdmin) {
     const lower = developerName.toLowerCase();
     if (lower.includes('lord demon') || lower.includes('lorddemon') || lower === 'admin' || lower.includes('fondateur orax')) {
-      developerName = currentAuthUser?.displayName || 'Développeur';
+      developerName = currentAuthUser.displayName || 'Développeur';
     }
   }
 
@@ -1283,13 +1017,13 @@ export async function saveNewProject(projectData: Omit<Project, 'id' | 'createdA
     id: newId,
     slug,
     developerName,
-    ownerId: verifiedOwnerId, // Strictly identified by Firebase Auth UID
-    ownerEmail: currentAuthUser?.email || projectData.ownerEmail || '',
+    ownerId: verifiedOwnerId,
+    ownerEmail: currentAuthUser.email || projectData.ownerEmail || '',
     status: projectData.status || 'published',
     downloads: 0,
     views: 1,
     favoritesCount: 0,
-    rating: 0, // All stars start strictly at 0 until user community rates
+    rating: 0,
     ratingsCount: 0,
     ratings: {},
     viewedBy: [verifiedOwnerId],
@@ -1299,43 +1033,41 @@ export async function saveNewProject(projectData: Omit<Project, 'id' | 'createdA
     updatedAt: now,
   };
 
-  // Mark author as having viewed this project locally
-  markProjectAsViewedLocally(newId, verifiedOwnerId);
-
-  // 1. Primary Source of Truth: Firestore persistence
-  if (db && isFirebaseConfigured()) {
-    updateSyncStatus('syncing');
-    try {
-      await setDoc(doc(db, 'projects', newId), sanitizeForFirestore(newProject));
-      updateSyncStatus('synced');
-    } catch (err: any) {
-      updateSyncStatus('error');
-      console.error('Erreur Firestore lors de la création du projet:', err);
-      throw new Error(`Échec de publication sur Firestore: ${err?.message || 'Erreur inconnue'}`);
-    }
+  updateSyncStatus('syncing');
+  try {
+    await setDoc(doc(db, 'projects', newId), sanitizeForFirestore(newProject));
+    updateSyncStatus('synced');
+  } catch (err: any) {
+    updateSyncStatus('error');
+    console.error('Erreur Firestore lors de la création du projet:', err);
+    throw new Error(`Échec de publication sur Firestore: ${err?.message || 'Erreur inconnue'}`);
   }
-
-  // 2. Update local cache and broadcast for immediate 0ms UI reactivity
-  const projects = getLocalProjects();
-  const updatedList = deduplicateProjects([newProject, ...projects]);
-  saveLocalProjects(updatedList);
-  broadcastProjectsChange(updatedList);
 
   return newProject;
 }
 
 export async function updateExistingProject(id: string, updates: Partial<Project>): Promise<Project> {
-  const projects = getLocalProjects();
-  const existingProject = projects.find(p => p.id === id);
-  const authUser = auth?.currentUser;
-  const isAdmin = authUser ? checkIsAdmin({ email: authUser.email || '', uid: authUser.uid }) : false;
-  const isOwner = Boolean(authUser && existingProject && existingProject.ownerId === authUser.uid);
-
-  if (authUser && existingProject && !isOwner && !isAdmin) {
-    throw new Error('Vous n\'êtes pas autorisé à modifier ce projet (seul le propriétaire UID ou l\'administrateur peut modifier).');
+  if (!db || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase manquante pour la mise à jour.');
   }
 
-  // Security: Prevent tampering with immutable identifiers and protected stats
+  const authUser = auth?.currentUser;
+  if (!authUser) {
+    throw new Error('Connexion requise pour modifier un projet.');
+  }
+
+  const existingProject = await getProjectById(id);
+  if (!existingProject) {
+    throw new Error('Projet introuvable sur Firestore.');
+  }
+
+  const isAdmin = checkIsAdmin({ email: authUser.email || '', uid: authUser.uid });
+  const isOwner = Boolean(existingProject.ownerId === authUser.uid);
+
+  if (!isOwner && !isAdmin) {
+    throw new Error('Vous n\'êtes pas autorisé à modifier ce projet.');
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { 
     ownerId: _ignoredOwnerId, 
@@ -1350,10 +1082,7 @@ export async function updateExistingProject(id: string, updates: Partial<Project
     ...cleanUpdates 
   } = updates as any;
 
-  // Non-admins cannot alter metrics directly via updateExistingProject
   const safeUpdates = isAdmin ? updates : cleanUpdates;
-
-  // Anti-spoofing: prevent non-admins from impersonating Lord Demon
   if (safeUpdates.developerName && !isAdmin) {
     const lower = safeUpdates.developerName.toLowerCase();
     if (lower.includes('lord demon') || lower.includes('lorddemon') || lower === 'admin' || lower.includes('fondateur orax')) {
@@ -1362,17 +1091,14 @@ export async function updateExistingProject(id: string, updates: Partial<Project
   }
 
   const now = new Date().toISOString();
-  
-  // Re-compute searchKeywords if relevant fields are being updated
   let newKeywords = safeUpdates.searchKeywords;
   if (
-    existingProject &&
-    (safeUpdates.name ||
-      safeUpdates.description ||
-      safeUpdates.shortDescription ||
-      safeUpdates.category ||
-      safeUpdates.technologies ||
-      safeUpdates.tags)
+    safeUpdates.name ||
+    safeUpdates.description ||
+    safeUpdates.shortDescription ||
+    safeUpdates.category ||
+    safeUpdates.technologies ||
+    safeUpdates.tags
   ) {
     newKeywords = generateSearchTokens({
       name: safeUpdates.name || existingProject.name,
@@ -1391,96 +1117,57 @@ export async function updateExistingProject(id: string, updates: Partial<Project
     updatedAt: now,
   };
 
-  // 1. Primary Source of Truth: Firestore update
-  if (db && isFirebaseConfigured()) {
-    updateSyncStatus('syncing');
-    try {
-      const docRef = doc(db, 'projects', id);
-      await updateDoc(docRef, sanitizeForFirestore(updatedData));
-      updateSyncStatus('synced');
-    } catch (err: any) {
-      updateSyncStatus('error');
-      console.error('Erreur Firestore lors de la mise à jour:', err);
-      throw new Error(`Échec de la mise à jour Firestore: ${err?.message || 'Erreur inconnue'}`);
-    }
+  updateSyncStatus('syncing');
+  try {
+    const docRef = doc(db, 'projects', id);
+    await updateDoc(docRef, sanitizeForFirestore(updatedData));
+    updateSyncStatus('synced');
+  } catch (err: any) {
+    updateSyncStatus('error');
+    console.error('Erreur Firestore lors de la mise à jour:', err);
+    throw new Error(`Échec de la mise à jour Firestore: ${err?.message || 'Erreur inconnue'}`);
   }
 
-  // 2. Update local cache and broadcast
-  const index = projects.findIndex(p => p.id === id);
-  let updatedProject: Project;
-  if (index !== -1) {
-    projects[index] = { ...projects[index], ...updatedData };
-    const cleanList = deduplicateProjects(projects);
-    saveLocalProjects(cleanList);
-    broadcastProjectsChange(cleanList);
-    updatedProject = projects[index];
-  } else {
-    updatedProject = { ...existingProject, ...updatedData } as Project;
-  }
-
-  return updatedProject;
+  return { ...existingProject, ...updatedData };
 }
 
 export async function deleteExistingProject(id: string, userId: string): Promise<boolean> {
-  const projects = getLocalProjects();
-  const project = projects.find(p => p.id === id);
-  const authUser = auth?.currentUser;
-  const isAdmin = authUser ? checkIsAdmin({ email: authUser.email || '', uid: authUser.uid }) : false;
+  if (!db || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase manquante pour la suppression.');
+  }
 
-  // Strict ownership check: Must match authenticated Firebase Auth UID
-  const isOwner = Boolean(
-    project && 
-    project.ownerId && 
-    (
-      (authUser && project.ownerId === authUser.uid) ||
-      project.ownerId === userId
-    )
-  );
+  const authUser = auth?.currentUser;
+  const project = await getProjectById(id);
+  if (!project) {
+    throw new Error('Projet introuvable.');
+  }
+
+  const isAdmin = authUser ? checkIsAdmin({ email: authUser.email || '', uid: authUser.uid }) : false;
+  const isOwner = Boolean((authUser && project.ownerId === authUser.uid) || project.ownerId === userId);
 
   if (!isOwner && !isAdmin) {
     throw new Error('Vous n\'êtes pas autorisé à supprimer ce projet.');
   }
 
-  // 1. Primary Source of Truth: Firestore deletion
-  if (db && isFirebaseConfigured()) {
-    updateSyncStatus('syncing');
-    try {
-      const docRef = doc(db, 'projects', id);
-      await deleteDoc(docRef);
-      updateSyncStatus('synced');
-    } catch (err: any) {
-      updateSyncStatus('error');
-      console.error('Erreur Firestore lors de la suppression:', err);
-      throw new Error(`Échec de la suppression Firestore: ${err?.message || 'Erreur inconnue'}`);
-    }
-  }
-
-  // 2. Remove from local storage cache & broadcast to UI
-  const updated = deduplicateProjects(projects.filter(p => p.id !== id));
-  saveLocalProjects(updated);
-  broadcastProjectsChange(updated);
-
-  // 3. Remove associated binary file from local IndexedDB asynchronously
-  deleteStoredFile(id).catch(() => {});
-  if (project?.fileUrl) {
-    deleteStoredFile(project.fileUrl).catch(() => {});
+  updateSyncStatus('syncing');
+  try {
+    const docRef = doc(db, 'projects', id);
+    await deleteDoc(docRef);
+    updateSyncStatus('synced');
+  } catch (err: any) {
+    updateSyncStatus('error');
+    console.error('Erreur Firestore lors de la suppression:', err);
+    throw new Error(`Échec de la suppression Firestore: ${err?.message || 'Erreur inconnue'}`);
   }
 
   return true;
 }
 
 // --------------------------------------------------------------------------
-// SECURE UNIQUE VIEW & DOWNLOAD TRACKING PER ACCOUNT / VISITOR
-// (Uses Serverless Function + Subcollection verification + Atomic transactions)
+// UNIQUE VIEW & DOWNLOAD TRACKING PER ACCOUNT / VISITOR
 // --------------------------------------------------------------------------
-
-const STORAGE_KEY_USER_VIEWS = 'orax_unique_user_views';
-const STORAGE_KEY_USER_DOWNLOADS = 'orax_unique_user_downloads';
 const STORAGE_KEY_GUEST_ID = 'orax_guest_device_id';
 
-/**
- * Returns a stable identifier for the current user or visitor device
- */
 export function getVisitorIdentifier(customUserId?: string): string {
   if (customUserId && customUserId.trim()) {
     return customUserId.trim();
@@ -1505,76 +1192,9 @@ export function getVisitorIdentifier(customUserId?: string): string {
   }
 }
 
-function hasUserViewedProjectLocally(projectId: string, visitorId: string): boolean {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_USER_VIEWS);
-    if (raw) {
-      const map: Record<string, string[]> = JSON.parse(raw);
-      if (map[visitorId] && map[visitorId].includes(projectId)) {
-        return true;
-      }
-    }
-  } catch {
-    // Ignore parse error
-  }
-  return false;
-}
-
-function markProjectAsViewedLocally(projectId: string, visitorId: string): void {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_USER_VIEWS);
-    const map: Record<string, string[]> = raw ? JSON.parse(raw) : {};
-    if (!map[visitorId]) {
-      map[visitorId] = [];
-    }
-    if (!map[visitorId].includes(projectId)) {
-      map[visitorId].push(projectId);
-    }
-    localStorage.setItem(STORAGE_KEY_USER_VIEWS, JSON.stringify(map));
-  } catch {
-    // Ignore storage errors
-  }
-}
-
-function hasUserDownloadedProjectLocally(projectId: string, visitorId: string): boolean {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_USER_DOWNLOADS);
-    if (raw) {
-      const map: Record<string, string[]> = JSON.parse(raw);
-      if (map[visitorId] && map[visitorId].includes(projectId)) {
-        return true;
-      }
-    }
-  } catch {
-    // Ignore parse error
-  }
-  return false;
-}
-
-function markProjectAsDownloadedLocally(projectId: string, visitorId: string): void {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_USER_DOWNLOADS);
-    const map: Record<string, string[]> = raw ? JSON.parse(raw) : {};
-    if (!map[visitorId]) {
-      map[visitorId] = [];
-    }
-    if (!map[visitorId].includes(projectId)) {
-      map[visitorId].push(projectId);
-    }
-    localStorage.setItem(STORAGE_KEY_USER_DOWNLOADS, JSON.stringify(map));
-  } catch {
-    // Ignore storage errors
-  }
-}
-
-// In-memory anti-spam debounce maps
 const recentViewCalls = new Map<string, number>();
 const recentDownloadCalls = new Map<string, number>();
 
-/**
- * Increments project downloads ONLY ONCE per user account / visitor.
- * Controlled server-side with atomic verification in projects/{projectId}/downloads/{visitorId}.
- */
 export async function recordProjectDownload(
   id: string, 
   customUserId?: string
@@ -1583,80 +1203,12 @@ export async function recordProjectDownload(
   const debounceKey = `${id}_${visitorId}`;
   const nowMs = Date.now();
 
-  // Rapid click / spam protection: Ignore requests within 2.5 seconds
   if (recentDownloadCalls.has(debounceKey) && nowMs - (recentDownloadCalls.get(debounceKey) || 0) < 2500) {
-    const projects = getLocalProjects();
-    const current = projects.find(p => p.id === id);
+    const current = await getProjectById(id);
     return { downloads: current?.downloads || 0, isNew: false };
   }
   recentDownloadCalls.set(debounceKey, nowMs);
 
-  const projects = getLocalProjects();
-  const index = projects.findIndex(p => p.id === id);
-  const targetProject = index !== -1 ? projects[index] : null;
-
-  // Anti-fraud: A developer cannot artificially inflate downloads on their own project
-  if (targetProject && auth?.currentUser?.uid && targetProject.ownerId === auth.currentUser.uid) {
-    return {
-      downloads: targetProject.downloads || 0,
-      isNew: false,
-    };
-  }
-
-  // 1. Fast local check to avoid redundant network hits
-  if (hasUserDownloadedProjectLocally(id, visitorId)) {
-    return {
-      downloads: targetProject?.downloads || 0,
-      isNew: false,
-    };
-  }
-
-  // Mark local optimistic cache
-  markProjectAsDownloadedLocally(id, visitorId);
-
-  // Retrieve Firebase ID Token if user is authenticated
-  let authToken: string | undefined;
-  try {
-    if (auth?.currentUser) {
-      authToken = await auth.currentUser.getIdToken(false);
-    }
-  } catch {
-    // Non-blocking token retrieval
-  }
-
-  // 2. Try Netlify Serverless Function first for server-authoritative tracking
-  try {
-    const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (authToken) {
-      reqHeaders['Authorization'] = `Bearer ${authToken}`;
-    }
-
-    const response = await fetch('/api/track-event', {
-      method: 'POST',
-      headers: reqHeaders,
-      body: JSON.stringify({
-        projectId: id,
-        type: 'download',
-        visitorId,
-        authToken,
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (index !== -1) {
-        projects[index].downloads = data.count;
-        const clean = deduplicateProjects(projects);
-        saveLocalProjects(clean);
-        broadcastProjectsChange(clean);
-      }
-      return { downloads: data.count, isNew: data.isNew };
-    }
-  } catch {
-    // Fallback to direct client-side atomic Firestore transaction if function is unreachable
-  }
-
-  // 3. Fallback: Direct Firestore Atomic Transaction using Subcollections
   if (db && isFirebaseConfigured()) {
     try {
       const projectRef = doc(db, 'projects', id);
@@ -1700,36 +1252,15 @@ export async function recordProjectDownload(
         return { downloads: newCount, isNew: true };
       });
 
-      if (index !== -1) {
-        projects[index].downloads = result.downloads;
-        const clean = deduplicateProjects(projects);
-        saveLocalProjects(clean);
-        broadcastProjectsChange(clean);
-      }
-
       return result;
     } catch (err) {
-      console.warn('Firestore direct transaction fallback notice:', err);
+      console.warn('Firestore recordProjectDownload notice:', err);
     }
   }
 
-  // 4. Offline / Local fallback
-  let updatedDownloads = 1;
-  if (index !== -1) {
-    projects[index].downloads = (projects[index].downloads || 0) + 1;
-    updatedDownloads = projects[index].downloads;
-    const clean = deduplicateProjects(projects);
-    saveLocalProjects(clean);
-    broadcastProjectsChange(clean);
-  }
-
-  return { downloads: updatedDownloads, isNew: true };
+  return { downloads: 1, isNew: true };
 }
 
-/**
- * Increments project views ONLY ONCE per user account / visitor.
- * Controlled server-side with atomic verification in projects/{projectId}/views/{visitorId}.
- */
 export async function recordProjectView(
   id: string, 
   customUserId?: string
@@ -1738,80 +1269,12 @@ export async function recordProjectView(
   const debounceKey = `${id}_${visitorId}`;
   const nowMs = Date.now();
 
-  // Rapid view / refresh spam protection: Ignore repeat calls within 2.5 seconds
   if (recentViewCalls.has(debounceKey) && nowMs - (recentViewCalls.get(debounceKey) || 0) < 2500) {
-    const projects = getLocalProjects();
-    const current = projects.find(p => p.id === id);
+    const current = await getProjectById(id);
     return { views: current?.views || 1, isNew: false };
   }
   recentViewCalls.set(debounceKey, nowMs);
 
-  const projects = getLocalProjects();
-  const index = projects.findIndex(p => p.id === id);
-  const targetProject = index !== -1 ? projects[index] : null;
-
-  // Anti-fraud: A developer viewing their own project does not inflate their view count
-  if (targetProject && auth?.currentUser?.uid && targetProject.ownerId === auth.currentUser.uid) {
-    return {
-      views: targetProject.views || 1,
-      isNew: false,
-    };
-  }
-
-  // 1. Fast local check
-  if (hasUserViewedProjectLocally(id, visitorId)) {
-    return {
-      views: targetProject?.views || 1,
-      isNew: false,
-    };
-  }
-
-  // Mark local optimistic cache
-  markProjectAsViewedLocally(id, visitorId);
-
-  // Retrieve Firebase ID Token if user is authenticated
-  let authToken: string | undefined;
-  try {
-    if (auth?.currentUser) {
-      authToken = await auth.currentUser.getIdToken(false);
-    }
-  } catch {
-    // Non-blocking token retrieval
-  }
-
-  // 2. Try Netlify Serverless Function first
-  try {
-    const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (authToken) {
-      reqHeaders['Authorization'] = `Bearer ${authToken}`;
-    }
-
-    const response = await fetch('/api/track-event', {
-      method: 'POST',
-      headers: reqHeaders,
-      body: JSON.stringify({
-        projectId: id,
-        type: 'view',
-        visitorId,
-        authToken,
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (index !== -1) {
-        projects[index].views = data.count;
-        const clean = deduplicateProjects(projects);
-        saveLocalProjects(clean);
-        broadcastProjectsChange(clean);
-      }
-      return { views: data.count, isNew: data.isNew };
-    }
-  } catch {
-    // Fallback to direct client-side atomic Firestore transaction if function is unreachable
-  }
-
-  // 3. Fallback: Direct Firestore Atomic Transaction using Subcollections
   if (db && isFirebaseConfigured()) {
     try {
       const projectRef = doc(db, 'projects', id);
@@ -1855,36 +1318,18 @@ export async function recordProjectView(
         return { views: newCount, isNew: true };
       });
 
-      if (index !== -1) {
-        projects[index].views = result.views;
-        const clean = deduplicateProjects(projects);
-        saveLocalProjects(clean);
-        broadcastProjectsChange(clean);
-      }
-
       return result;
     } catch (err) {
-      console.warn('Firestore direct transaction fallback notice:', err);
+      console.warn('Firestore recordProjectView notice:', err);
     }
   }
 
-  // 4. Offline / Local fallback
-  let updatedViews = 1;
-  if (index !== -1) {
-    projects[index].views = (projects[index].views || 0) + 1;
-    updatedViews = projects[index].views;
-    const clean = deduplicateProjects(projects);
-    saveLocalProjects(clean);
-    broadcastProjectsChange(clean);
-  }
-
-  return { views: updatedViews, isNew: true };
+  return { views: 1, isNew: true };
 }
 
 // --------------------------------------------------------------------------
 // MODERATION & REPORTS SERVICES
 // --------------------------------------------------------------------------
-
 export async function submitProjectReport(
   reportData: Omit<ProjectReport, 'id' | 'createdAt' | 'status'>
 ): Promise<ProjectReport> {
@@ -1906,15 +1351,12 @@ export async function submitProjectReport(
     createdAt: now,
   };
 
-  const reports = getLocalReports();
-  reports.unshift(newReport);
-  saveLocalReports(reports);
-
   if (db && isFirebaseConfigured()) {
     try {
       await setDoc(doc(db, 'reports', newId), sanitizeForFirestore(newReport));
-    } catch (err) {
-      console.warn('Firestore save report warning:', err);
+    } catch (err: any) {
+      console.error('Erreur Firestore submitProjectReport:', err);
+      throw new Error(`Échec du signalement: ${err?.message || 'Erreur réseau'}`);
     }
   }
 
@@ -1930,15 +1372,13 @@ export async function getProjectReports(): Promise<ProjectReport[]> {
       const q = query(collection(db, 'reports'), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
       if (snapshot && !snapshot.empty) {
-        const fetched = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProjectReport));
-        saveLocalReports(fetched);
-        return fetched;
+        return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProjectReport));
       }
     } catch (err) {
-      console.warn('Firestore reports fetch fallback:', err);
+      console.warn('Firestore reports fetch notice:', err);
     }
   }
-  return getLocalReports();
+  return [];
 }
 
 export async function updateReportStatus(reportId: string, status: ReportStatus): Promise<void> {
@@ -1949,20 +1389,13 @@ export async function updateReportStatus(reportId: string, status: ReportStatus)
     throw new Error('Seul l\'administrateur peut modifier le statut d\'un signalement.');
   }
 
-  const reports = getLocalReports();
-  const idx = reports.findIndex(r => r.id === reportId);
-  if (idx !== -1) {
-    reports[idx].status = status;
-    reports[idx].updatedAt = new Date().toISOString();
-    saveLocalReports(reports);
-  }
-
   if (db && isFirebaseConfigured()) {
     try {
       const docRef = doc(db, 'reports', reportId);
       await updateDoc(docRef, { status, updatedAt: new Date().toISOString() });
-    } catch (err) {
-      console.warn('Firestore report status update error:', err);
+    } catch (err: any) {
+      console.error('Firestore report status update error:', err);
+      throw new Error(`Échec de la mise à jour du statut: ${err?.message || 'Erreur réseau'}`);
     }
   }
 }
@@ -1972,10 +1405,8 @@ export async function updateProjectStatus(projectId: string, status: ProjectStat
 }
 
 // --------------------------------------------------------------------------
+// RATINGS & REVIEWS SERVICES (1 to 5 Stars System)
 // --------------------------------------------------------------------------
-// RATINGS & REVIEWS SERVICES (Play Store 1 to 5 Stars System)
-// --------------------------------------------------------------------------
-
 export interface RatingDistribution {
   total: number;
   average: number;
@@ -1983,9 +1414,6 @@ export interface RatingDistribution {
   percentages: { 1: number; 2: number; 3: number; 4: number; 5: number };
 }
 
-/**
- * Calculates the exact star breakdown (5★ to 1★) identical to Google Play Store
- */
 export function getProjectRatingDistribution(project: Project | null | undefined): RatingDistribution {
   const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   if (!project) {
@@ -2006,7 +1434,6 @@ export function getProjectRatingDistribution(project: Project | null | undefined
       counts[rounded] = (counts[rounded] || 0) + 1;
     });
   } else if (project.rating && project.rating > 0 && project.ratingsCount && project.ratingsCount > 0) {
-    // If ratings dict wasn't populated but aggregate count exists
     const rounded = Math.max(1, Math.min(5, Math.round(project.rating))) as 1 | 2 | 3 | 4 | 5;
     counts[rounded] = project.ratingsCount;
   }
@@ -2037,14 +1464,16 @@ export async function rateProject(
   user: UserProfile
 ): Promise<{ rating: number; ratingsCount: number; userRating: number; distribution: RatingDistribution }> {
   const cleanScore = Math.max(1, Math.min(5, Math.round(score)));
-  const projects = getLocalProjects();
-  const index = projects.findIndex(p => p.id === projectId);
-  
-  if (index === -1) {
+
+  if (!db || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase requise pour noter un projet.');
+  }
+
+  const project = await getProjectById(projectId);
+  if (!project) {
     throw new Error('Projet introuvable.');
   }
 
-  const project = { ...projects[index] };
   const currentRatings: Record<string, number> = { ...(project.ratings || {}) };
   currentRatings[user.uid] = cleanScore;
 
@@ -2052,136 +1481,98 @@ export async function rateProject(
   const count = totalScores.length;
   const avg = count > 0 ? parseFloat((totalScores.reduce((a, b) => a + b, 0) / count).toFixed(1)) : cleanScore;
 
-  // 1. Authoritative Firestore persistence
-  if (db && isFirebaseConfigured()) {
-    updateSyncStatus('syncing');
-    try {
-      const projectRef = doc(db, 'projects', projectId);
-      const ratingDocRef = doc(db, 'projects', projectId, 'ratings', user.uid);
+  updateSyncStatus('syncing');
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const ratingDocRef = doc(db, 'projects', projectId, 'ratings', user.uid);
 
-      await Promise.all([
-        setDoc(ratingDocRef, sanitizeForFirestore({
-          userId: user.uid,
-          userDisplayName: user.displayName,
-          rating: cleanScore,
-          updatedAt: new Date().toISOString(),
-        })),
-        updateDoc(projectRef, {
-          rating: avg,
-          ratingsCount: count,
-          [`ratings.${user.uid}`]: cleanScore,
-          updatedAt: new Date().toISOString(),
-        })
-      ]);
-      updateSyncStatus('synced');
-    } catch (err: any) {
-      updateSyncStatus('error');
-      console.error('Erreur Firestore rateProject:', err);
-      throw new Error(`Échec de l'enregistrement de votre note: ${err?.message || 'Erreur inconnue'}`);
-    }
+    await Promise.all([
+      setDoc(ratingDocRef, sanitizeForFirestore({
+        userId: user.uid,
+        userDisplayName: user.displayName,
+        rating: cleanScore,
+        updatedAt: new Date().toISOString(),
+      })),
+      updateDoc(projectRef, {
+        rating: avg,
+        ratingsCount: count,
+        [`ratings.${user.uid}`]: cleanScore,
+        updatedAt: new Date().toISOString(),
+      })
+    ]);
+    updateSyncStatus('synced');
+  } catch (err: any) {
+    updateSyncStatus('error');
+    console.error('Erreur Firestore rateProject:', err);
+    throw new Error(`Échec de l'enregistrement de votre note: ${err?.message || 'Erreur inconnue'}`);
   }
 
-  // 2. Update local state & broadcast after Firestore confirmation
-  project.rating = avg;
-  project.ratingsCount = count;
-  project.ratings = currentRatings;
-  project.updatedAt = new Date().toISOString();
-
-  projects[index] = project;
-  const clean = deduplicateProjects(projects);
-  saveLocalProjects(clean);
-  broadcastProjectsChange(clean);
-
-  const distribution = getProjectRatingDistribution(project);
+  const updatedProject = {
+    ...project,
+    rating: avg,
+    ratingsCount: count,
+    ratings: currentRatings,
+  };
+  const distribution = getProjectRatingDistribution(updatedProject);
   return { rating: avg, ratingsCount: count, userRating: cleanScore, distribution };
 }
 
-/**
- * Removes a user's rating (Google Play Store style: "Supprimer la note")
- * and recalculates average rating.
- */
 export async function deleteProjectRating(
   projectId: string,
   user: UserProfile
 ): Promise<{ rating: number; ratingsCount: number; distribution: RatingDistribution }> {
-  const projects = getLocalProjects();
-  const index = projects.findIndex(p => p.id === projectId);
+  if (!db || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase requise.');
+  }
 
-  if (index === -1) {
+  const project = await getProjectById(projectId);
+  if (!project) {
     throw new Error('Projet introuvable.');
   }
 
-  const project = { ...projects[index] };
   const currentRatings: Record<string, number> = { ...(project.ratings || {}) };
-
   delete currentRatings[user.uid];
 
   const totalScores = Object.values(currentRatings);
   const count = totalScores.length;
   const avg = count > 0 ? parseFloat((totalScores.reduce((a, b) => a + b, 0) / count).toFixed(1)) : 0;
 
-  // 1. Authoritative Firestore deletion
-  if (db && isFirebaseConfigured()) {
-    updateSyncStatus('syncing');
-    try {
-      const projectRef = doc(db, 'projects', projectId);
-      const ratingDocRef = doc(db, 'projects', projectId, 'ratings', user.uid);
+  updateSyncStatus('syncing');
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const ratingDocRef = doc(db, 'projects', projectId, 'ratings', user.uid);
 
-      await Promise.all([
-        deleteDoc(ratingDocRef),
-        updateDoc(projectRef, {
-          rating: avg,
-          ratingsCount: count,
-          ratings: currentRatings,
-          updatedAt: new Date().toISOString(),
-        })
-      ]);
-      updateSyncStatus('synced');
-    } catch (err: any) {
-      updateSyncStatus('error');
-      console.error('Erreur Firestore deleteProjectRating:', err);
-      throw new Error(`Échec de la suppression de votre note: ${err?.message || 'Erreur inconnue'}`);
-    }
+    await Promise.all([
+      deleteDoc(ratingDocRef),
+      updateDoc(projectRef, {
+        rating: avg,
+        ratingsCount: count,
+        ratings: currentRatings,
+        updatedAt: new Date().toISOString(),
+      })
+    ]);
+    updateSyncStatus('synced');
+  } catch (err: any) {
+    updateSyncStatus('error');
+    console.error('Erreur Firestore deleteProjectRating:', err);
+    throw new Error(`Échec de la suppression de votre note: ${err?.message || 'Erreur inconnue'}`);
   }
 
-  // 2. Update local state & broadcast
-  project.rating = avg;
-  project.ratingsCount = count;
-  project.ratings = currentRatings;
-  project.updatedAt = new Date().toISOString();
-
-  projects[index] = project;
-  const clean = deduplicateProjects(projects);
-  saveLocalProjects(clean);
-  broadcastProjectsChange(clean);
-
-  const distribution = getProjectRatingDistribution(project);
+  const updatedProject = {
+    ...project,
+    rating: avg,
+    ratingsCount: count,
+    ratings: currentRatings,
+  };
+  const distribution = getProjectRatingDistribution(updatedProject);
   return { rating: avg, ratingsCount: count, distribution };
 }
 
 // --------------------------------------------------------------------------
 // COMMENTS SERVICES
 // --------------------------------------------------------------------------
-
-const COMMENTS_CACHE_PREFIX = 'orax_comments_';
-
-export function getLocalComments(projectId: string): ProjectComment[] {
-  try {
-    const raw = localStorage.getItem(`${COMMENTS_CACHE_PREFIX}${projectId}`);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveLocalComments(projectId: string, comments: ProjectComment[]): void {
-  try {
-    localStorage.setItem(`${COMMENTS_CACHE_PREFIX}${projectId}`, JSON.stringify(comments));
-  } catch {}
-}
-
 export async function getProjectComments(projectId: string): Promise<ProjectComment[]> {
-  if (db && isFirebaseConfigured()) {
+  if (db && isFirebaseConfigured() && projectId) {
     try {
       const q = query(
         collection(db, 'projects', projectId, 'comments'),
@@ -2189,25 +1580,21 @@ export async function getProjectComments(projectId: string): Promise<ProjectComm
       );
       const snapshot = await getDocs(q);
       if (snapshot && !snapshot.empty) {
-        const comments = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProjectComment));
-        saveLocalComments(projectId, comments);
-        return comments;
+        return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProjectComment));
       }
     } catch (err) {
       console.warn('Firestore comments fetch notice:', err);
     }
   }
-  return getLocalComments(projectId);
+  return [];
 }
 
 export function subscribeToProjectComments(
   projectId: string,
   callback: (comments: ProjectComment[]) => void
 ): () => void {
-  // Call immediately with local cache
-  callback(getLocalComments(projectId));
-
   if (!db || !isFirebaseConfigured() || !projectId) {
+    callback([]);
     return () => {};
   }
 
@@ -2221,18 +1608,18 @@ export function subscribeToProjectComments(
       (snapshot) => {
         if (snapshot) {
           const comments = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProjectComment));
-          saveLocalComments(projectId, comments);
           callback(comments);
         }
       },
       (err) => {
         console.warn('Firestore comments onSnapshot notice:', err);
-        callback(getLocalComments(projectId));
+        callback([]);
       }
     );
     return unsubscribe;
   } catch (err) {
     console.warn('Firestore comments subscription init notice:', err);
+    callback([]);
     return () => {};
   }
 }
@@ -2264,7 +1651,6 @@ export async function addProjectComment(
     createdAt: now,
   };
 
-  // 1. Authoritative Firestore persistence first
   if (db && isFirebaseConfigured()) {
     updateSyncStatus('syncing');
     try {
@@ -2278,7 +1664,6 @@ export async function addProjectComment(
     }
   }
 
-  // If rating provided, update project rating synchronously
   if (rating) {
     try {
       await rateProject(projectId, rating, user);
@@ -2286,11 +1671,6 @@ export async function addProjectComment(
       console.warn('Rate project alongside comment warning:', err);
     }
   }
-
-  // 2. Update local state
-  const localComments = getLocalComments(projectId);
-  const updatedComments = [newComment, ...localComments.filter(c => c.id !== commentId)];
-  saveLocalComments(projectId, updatedComments);
 
   return newComment;
 }
@@ -2307,13 +1687,17 @@ export async function editProjectComment(
     throw new Error('Le commentaire ne peut pas être vide.');
   }
 
-  const localComments = getLocalComments(projectId);
-  const idx = localComments.findIndex(c => c.id === commentId);
-  if (idx === -1) {
+  if (!db || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase requise.');
+  }
+
+  const commentDocRef = doc(db, 'projects', projectId, 'comments', commentId);
+  const snap = await getDoc(commentDocRef);
+  if (!snap.exists()) {
     throw new Error('Commentaire introuvable.');
   }
 
-  const existing = localComments[idx];
+  const existing = { id: snap.id, ...snap.data() } as ProjectComment;
   if (existing.userId !== user.uid && !user.isAdmin) {
     throw new Error('Vous n\'êtes pas autorisé à modifier ce commentaire.');
   }
@@ -2326,21 +1710,16 @@ export async function editProjectComment(
     updatedAt: new Date().toISOString(),
   };
 
-  // 1. Authoritative Firestore update
-  if (db && isFirebaseConfigured()) {
-    updateSyncStatus('syncing');
-    try {
-      const commentDocRef = doc(db, 'projects', projectId, 'comments', commentId);
-      await setDoc(commentDocRef, sanitizeForFirestore(updatedComment), { merge: true });
-      updateSyncStatus('synced');
-    } catch (err: any) {
-      updateSyncStatus('error');
-      console.error('Erreur Firestore editProjectComment:', err);
-      throw new Error(`Échec de la modification du commentaire: ${err?.message || 'Erreur inconnue'}`);
-    }
+  updateSyncStatus('syncing');
+  try {
+    await setDoc(commentDocRef, sanitizeForFirestore(updatedComment), { merge: true });
+    updateSyncStatus('synced');
+  } catch (err: any) {
+    updateSyncStatus('error');
+    console.error('Erreur Firestore editProjectComment:', err);
+    throw new Error(`Échec de la modification du commentaire: ${err?.message || 'Erreur inconnue'}`);
   }
 
-  // If rating changed, update project rating as well
   if (cleanRating) {
     try {
       await rateProject(projectId, cleanRating, user);
@@ -2348,10 +1727,6 @@ export async function editProjectComment(
       console.warn('Update rate alongside comment warning:', err);
     }
   }
-
-  // 2. Update local cache
-  localComments[idx] = updatedComment;
-  saveLocalComments(projectId, localComments);
 
   return updatedComment;
 }
@@ -2361,13 +1736,17 @@ export async function toggleCommentHelpful(
   projectId: string,
   user: UserProfile
 ): Promise<{ helpfulCount: number; isHelpful: boolean }> {
-  const localComments = getLocalComments(projectId);
-  const idx = localComments.findIndex(c => c.id === commentId);
-  if (idx === -1) {
+  if (!db || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase requise.');
+  }
+
+  const commentDocRef = doc(db, 'projects', projectId, 'comments', commentId);
+  const snap = await getDoc(commentDocRef);
+  if (!snap.exists()) {
     throw new Error('Commentaire introuvable.');
   }
 
-  const comment = { ...localComments[idx] };
+  const comment = { id: snap.id, ...snap.data() } as ProjectComment;
   const helpfulUsers = Array.from(new Set(comment.helpfulUsers || []));
   const userIdx = helpfulUsers.indexOf(user.uid);
   const isHelpful = userIdx === -1;
@@ -2378,27 +1757,17 @@ export async function toggleCommentHelpful(
     helpfulUsers.splice(userIdx, 1);
   }
 
-  // 1. Authoritative Firestore update
-  if (db && isFirebaseConfigured()) {
-    try {
-      const commentDocRef = doc(db, 'projects', projectId, 'comments', commentId);
-      await updateDoc(commentDocRef, {
-        helpfulUsers,
-        helpfulCount: helpfulUsers.length,
-      });
-    } catch (err: any) {
-      console.error('Erreur Firestore toggleCommentHelpful:', err);
-      throw new Error(`Échec de la mise à jour: ${err?.message || 'Erreur réseau'}`);
-    }
+  try {
+    await updateDoc(commentDocRef, {
+      helpfulUsers,
+      helpfulCount: helpfulUsers.length,
+    });
+  } catch (err: any) {
+    console.error('Erreur Firestore toggleCommentHelpful:', err);
+    throw new Error(`Échec de la mise à jour: ${err?.message || 'Erreur réseau'}`);
   }
 
-  // 2. Update local cache
-  comment.helpfulUsers = helpfulUsers;
-  comment.helpfulCount = helpfulUsers.length;
-  localComments[idx] = comment;
-  saveLocalComments(projectId, localComments);
-
-  return { helpfulCount: comment.helpfulCount, isHelpful };
+  return { helpfulCount: helpfulUsers.length, isHelpful };
 }
 
 export async function replyToProjectComment(
@@ -2412,13 +1781,16 @@ export async function replyToProjectComment(
     throw new Error('La réponse ne peut pas être vide.');
   }
 
-  const localComments = getLocalComments(projectId);
-  const idx = localComments.findIndex(c => c.id === commentId);
-  if (idx === -1) {
+  if (!db || !isFirebaseConfigured()) {
+    throw new Error('Configuration Firebase requise.');
+  }
+
+  const commentDocRef = doc(db, 'projects', projectId, 'comments', commentId);
+  const snap = await getDoc(commentDocRef);
+  if (!snap.exists()) {
     throw new Error('Commentaire introuvable.');
   }
 
-  const comment = { ...localComments[idx] };
   const replyObj = {
     content: cleanReply,
     createdAt: new Date().toISOString(),
@@ -2426,28 +1798,19 @@ export async function replyToProjectComment(
     developerPhotoURL: developerUser.photoURL,
   };
 
-  // 1. Authoritative Firestore update
-  if (db && isFirebaseConfigured()) {
-    updateSyncStatus('syncing');
-    try {
-      const commentDocRef = doc(db, 'projects', projectId, 'comments', commentId);
-      await updateDoc(commentDocRef, {
-        developerReply: sanitizeForFirestore(replyObj),
-      });
-      updateSyncStatus('synced');
-    } catch (err: any) {
-      updateSyncStatus('error');
-      console.error('Erreur Firestore replyToProjectComment:', err);
-      throw new Error(`Échec de l'envoi de la réponse: ${err?.message || 'Erreur inconnue'}`);
-    }
+  updateSyncStatus('syncing');
+  try {
+    await updateDoc(commentDocRef, {
+      developerReply: sanitizeForFirestore(replyObj),
+    });
+    updateSyncStatus('synced');
+  } catch (err: any) {
+    updateSyncStatus('error');
+    console.error('Erreur Firestore replyToProjectComment:', err);
+    throw new Error(`Échec de l'envoi de la réponse: ${err?.message || 'Erreur inconnue'}`);
   }
 
-  // 2. Update local cache
-  comment.developerReply = replyObj;
-  localComments[idx] = comment;
-  saveLocalComments(projectId, localComments);
-
-  return comment;
+  return { ...snap.data(), id: snap.id, developerReply: replyObj } as ProjectComment;
 }
 
 export async function deleteProjectComment(
@@ -2456,7 +1819,6 @@ export async function deleteProjectComment(
   _userId: string,
   _isAdmin?: boolean
 ): Promise<boolean> {
-  // 1. Authoritative Firestore deletion
   if (db && isFirebaseConfigured()) {
     updateSyncStatus('syncing');
     try {
@@ -2469,46 +1831,16 @@ export async function deleteProjectComment(
       throw new Error(`Échec de la suppression du commentaire: ${err?.message || 'Erreur inconnue'}`);
     }
   }
-
-  // 2. Update local cache
-  const localComments = getLocalComments(projectId);
-  const filtered = localComments.filter(c => c.id !== commentId);
-  saveLocalComments(projectId, filtered);
-
   return true;
 }
 
 // --------------------------------------------------------------------------
-// DEVELOPER FOLLOW SYSTEM
+// DEVELOPER FOLLOW & FAVORITES SYSTEM
 // --------------------------------------------------------------------------
-
-const FOLLOWING_CACHE_KEY = 'orax_following_devs';
-
-export function getLocalFollowing(): string[] {
-  try {
-    const raw = localStorage.getItem(FOLLOWING_CACHE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveLocalFollowing(following: string[]): void {
-  try {
-    localStorage.setItem(FOLLOWING_CACHE_KEY, JSON.stringify(Array.from(new Set(following))));
-  } catch {}
-}
-
 export function isFollowingDeveloper(developerIdentifier: string, user: UserProfile | null): boolean {
-  if (!developerIdentifier) return false;
+  if (!developerIdentifier || !user?.following) return false;
   const cleanId = developerIdentifier.trim().toLowerCase();
-  
-  if (user?.following && user.following.some(f => f.trim().toLowerCase() === cleanId)) {
-    return true;
-  }
-  
-  const localFollowing = getLocalFollowing();
-  return localFollowing.some(f => f.trim().toLowerCase() === cleanId);
+  return user.following.some(f => f.trim().toLowerCase() === cleanId);
 }
 
 export async function toggleFollowDeveloper(
@@ -2520,7 +1852,7 @@ export async function toggleFollowDeveloper(
   }
 
   const cleanTarget = developerIdentifier.trim();
-  const currentList = Array.from(new Set(user.following || getLocalFollowing()));
+  const currentList = Array.from(new Set(user.following || []));
   const targetLower = cleanTarget.toLowerCase();
 
   const isCurrentlyFollowing = currentList.some(f => f.toLowerCase() === targetLower);
@@ -2532,7 +1864,6 @@ export async function toggleFollowDeveloper(
     updatedList = [...currentList, cleanTarget];
   }
 
-  // 1. Authoritative Firestore update
   if (db && isFirebaseConfigured() && user.uid) {
     updateSyncStatus('syncing');
     try {
@@ -2546,42 +1877,15 @@ export async function toggleFollowDeveloper(
     }
   }
 
-  // 2. Update local cache & current user session
-  saveLocalFollowing(updatedList);
   const updatedUser: UserProfile = { ...user, following: updatedList };
   saveCachedSession(updatedUser);
 
   return { isFollowing: !isCurrentlyFollowing, followingList: updatedList };
 }
 
-// --------------------------------------------------------------------------
-// FAVORITES (PROJETS FAVORIS) SYSTEM
-// --------------------------------------------------------------------------
-
-const FAVORITES_CACHE_KEY = 'orax_user_favorites';
-
-export function getLocalFavorites(): string[] {
-  try {
-    const raw = localStorage.getItem(FAVORITES_CACHE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveLocalFavorites(favorites: string[]): void {
-  try {
-    localStorage.setItem(FAVORITES_CACHE_KEY, JSON.stringify(favorites));
-  } catch {}
-}
-
 export function isProjectFavorited(projectId: string, user?: UserProfile | null): boolean {
-  if (!projectId) return false;
-  if (user?.favorites && user.favorites.includes(projectId)) {
-    return true;
-  }
-  const local = getLocalFavorites();
-  return local.includes(projectId);
+  if (!projectId || !user?.favorites) return false;
+  return user.favorites.includes(projectId);
 }
 
 export async function toggleFavoriteProject(
@@ -2592,7 +1896,7 @@ export async function toggleFavoriteProject(
     throw new Error('Projet ou utilisateur invalide.');
   }
 
-  const currentList = Array.from(new Set(user.favorites || getLocalFavorites()));
+  const currentList = Array.from(new Set(user.favorites || []));
   const isCurrentlyFav = currentList.includes(projectId);
   let updatedList: string[];
 
@@ -2602,7 +1906,6 @@ export async function toggleFavoriteProject(
     updatedList = [...currentList, projectId];
   }
 
-  // 1. Authoritative Firestore synchronization
   if (db && isFirebaseConfigured()) {
     updateSyncStatus('syncing');
     try {
@@ -2625,28 +1928,43 @@ export async function toggleFavoriteProject(
     }
   }
 
-  // 2. Update local storage and cached session after Firestore confirmation
-  saveLocalFavorites(updatedList);
   const updatedUser: UserProfile = { ...user, favorites: updatedList };
   saveCachedSession(updatedUser);
 
-  // Update project favoritesCount locally & broadcast
-  const localProjects = getLocalProjects();
-  const projIndex = localProjects.findIndex(p => p.id === projectId);
-  if (projIndex !== -1) {
-    const currentFavCount = localProjects[projIndex].favoritesCount || 0;
-    localProjects[projIndex].favoritesCount = Math.max(0, currentFavCount + (isCurrentlyFav ? -1 : 1));
-    saveLocalProjects(localProjects);
-    broadcastProjectsChange(localProjects);
-  }
-
   return { isFavorited: !isCurrentlyFav, favorites: updatedList };
+}
+
+export async function getUserProjects(userId: string): Promise<Project[]> {
+  if (!db || !isFirebaseConfigured() || !userId) return [];
+  try {
+    const q = query(
+      collection(db, 'projects'),
+      where('ownerId', '==', userId),
+      orderBy('createdAt', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
+  } catch (err) {
+    console.warn('getUserProjects error:', err);
+    return [];
+  }
+}
+
+export async function getUserFavoriteProjects(favorites: string[]): Promise<Project[]> {
+  if (!db || !isFirebaseConfigured() || !favorites || favorites.length === 0) return [];
+  try {
+    const promises = favorites.slice(0, 30).map(id => getProjectById(id));
+    const results = await Promise.all(promises);
+    return results.filter((p): p is Project => p !== null);
+  } catch (err) {
+    console.warn('getUserFavoriteProjects error:', err);
+    return [];
+  }
 }
 
 // --------------------------------------------------------------------------
 // DEVELOPERS LEADERBOARD & RANKINGS
 // --------------------------------------------------------------------------
-
 export function getDevelopersLeaderboard(allProjects: Project[]): DeveloperInfo[] {
   const devMap: Record<string, { name: string; isLord: boolean; projects: Project[] }> = {};
 
@@ -2667,7 +1985,6 @@ export function getDevelopersLeaderboard(allProjects: Project[]): DeveloperInfo[
     devMap[key].projects.push(project);
   });
 
-  // Convert map to DeveloperInfo array
   const leaderboard = Object.values(devMap).map(devGroup => {
     const totalDownloads = devGroup.projects.reduce((sum, p) => sum + (p.downloads || 0), 0);
     const totalViews = devGroup.projects.reduce((sum, p) => sum + (p.views || 0), 0);
@@ -2710,7 +2027,6 @@ export function getDevelopersLeaderboard(allProjects: Project[]): DeveloperInfo[
     };
   });
 
-  // Sort by total downloads descending
   leaderboard.sort((a, b) => {
     if (a.isLordDemon && !b.isLordDemon) return -1;
     if (!a.isLordDemon && b.isLordDemon) return 1;
@@ -2720,10 +2036,6 @@ export function getDevelopersLeaderboard(allProjects: Project[]): DeveloperInfo[
   return leaderboard;
 }
 
-// --------------------------------------------------------------------------
-// DEVELOPER INFO & PROFILES COMPUTATION
-// --------------------------------------------------------------------------
-
 export function getDeveloperInfo(
   developerIdentifier: string,
   allProjects: Project[]
@@ -2731,7 +2043,6 @@ export function getDeveloperInfo(
   const target = (developerIdentifier || '').trim();
   const targetLower = target.toLowerCase();
 
-  // Match by developerName OR ownerId
   const devProjects = allProjects.filter(p => 
     (p.developerName && p.developerName.toLowerCase() === targetLower) || 
     (p.ownerId && p.ownerId === target)
@@ -2769,9 +2080,7 @@ export function getDeveloperInfo(
     : 0;
 
   const fallbackRatingsCount = totalRatingsCount;
-
   const isCertified = isLordDemon || devProjects.some(p => (p.downloads || 0) >= 50 && (p.views || 0) >= 100);
-  const privacy = getDeveloperTrophiesPrivacy(target, devProjects[0]?.ownerId);
 
   return {
     id: devProjects[0]?.ownerId || target,
@@ -2789,41 +2098,15 @@ export function getDeveloperInfo(
     followersCount: isLordDemon ? 142 : Math.max(1, devProjects.length * 3),
     isLordDemon,
     isCertified,
-    trophiesPrivacy: privacy,
+    trophiesPrivacy: 'public',
     pinnedTrophyId: isLordDemon ? 'trophy_legendary_lord' : undefined,
     publishedTrophies: isLordDemon ? ['trophy_legendary_lord', 'trophy_verified_creator', 'trophy_download_titan'] : [],
     projects: devProjects,
   };
 }
 
-// --------------------------------------------------------------------------
-// TROPHIES PRIVACY & SHOWCASE SHARING HELPERS
-// --------------------------------------------------------------------------
-const STORAGE_KEY_TROPHIES_PRIVACY = 'orax_trophies_privacy_map';
-
-export function getDeveloperTrophiesPrivacy(developerIdentifier?: string, ownerId?: string): 'public' | 'private' {
-  if (!developerIdentifier && !ownerId) return 'public';
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_TROPHIES_PRIVACY);
-    if (raw) {
-      const map: Record<string, 'public' | 'private'> = JSON.parse(raw);
-      if (ownerId && map[ownerId]) return map[ownerId];
-      if (developerIdentifier && map[developerIdentifier.trim().toLowerCase()]) {
-        return map[developerIdentifier.trim().toLowerCase()];
-      }
-    }
-  } catch {}
+export function getDeveloperTrophiesPrivacy(_developerIdentifier?: string, _ownerId?: string): 'public' | 'private' {
   return 'public';
-}
-
-export function saveLocalTrophiesPrivacy(uid: string, displayName: string, privacy: 'public' | 'private'): void {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_TROPHIES_PRIVACY);
-    const map: Record<string, 'public' | 'private'> = raw ? JSON.parse(raw) : {};
-    if (uid) map[uid] = privacy;
-    if (displayName) map[displayName.trim().toLowerCase()] = privacy;
-    localStorage.setItem(STORAGE_KEY_TROPHIES_PRIVACY, JSON.stringify(map));
-  } catch {}
 }
 
 export async function updateTrophiesPrivacy(
@@ -2835,7 +2118,6 @@ export async function updateTrophiesPrivacy(
     trophiesPrivacy: privacy,
   };
 
-  // 1. Authoritative Firestore update
   if (db && isFirebaseConfigured() && user.uid) {
     updateSyncStatus('syncing');
     try {
@@ -2851,10 +2133,7 @@ export async function updateTrophiesPrivacy(
     }
   }
 
-  // 2. Save locally
-  saveLocalTrophiesPrivacy(user.uid, user.displayName, privacy);
   saveCachedSession(updatedUser);
-
   return updatedUser;
 }
 
@@ -2873,7 +2152,6 @@ export async function togglePublishTrophy(
     publishedTrophies: updatedPublished,
   };
 
-  // 1. Authoritative Firestore update
   if (db && isFirebaseConfigured() && user.uid) {
     updateSyncStatus('syncing');
     try {
@@ -2889,9 +2167,7 @@ export async function togglePublishTrophy(
     }
   }
 
-  // 2. Save locally
   saveCachedSession(updatedUser);
-
   return { isPublished: !isAlreadyPublished, user: updatedUser };
 }
 
@@ -2922,5 +2198,3 @@ export async function setPinnedTrophy(
   saveCachedSession(updatedUser);
   return updatedUser;
 }
-
-

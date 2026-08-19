@@ -18,7 +18,6 @@ import { Project, ProjectCategory, UserProfile } from '../types';
 import { CATEGORIES } from '../data/categories';
 import { uploadToCloudinary, formatFileSize, validateProjectFile, validateThumbnailFile } from '../services/cloudinary';
 import { saveNewProject } from '../services/firebase';
-import { saveFileToIndexedDB } from '../utils/fileStorage';
 import { useToast } from './Toast';
 import { motion } from 'motion/react';
 
@@ -228,14 +227,6 @@ export const PublishModal: React.FC<PublishModalProps> = ({
         ],
         featured: false,
       });
-
-      // 3. Store binary file in IndexedDB asynchronously without blocking the user
-      saveFileToIndexedDB(newProject.id, projectFile, projectFile.name).catch((idbErr) => {
-        console.warn('IndexedDB save warning:', idbErr);
-      });
-      if (uploadResult.url) {
-        saveFileToIndexedDB(uploadResult.url, projectFile, projectFile.name).catch(() => {});
-      }
 
       setIsUploading(false);
       showToast({

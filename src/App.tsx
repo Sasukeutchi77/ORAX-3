@@ -23,6 +23,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { ReportModal } from './components/ReportModal';
 import { DeveloperLeaderboard } from './components/DeveloperLeaderboard';
 import { DeveloperDashboard } from './components/DeveloperDashboard';
+import { SimulationModal } from './components/SimulationModal';
 import { ToastProvider, useToast } from './components/Toast';
 import { 
   getProjects, 
@@ -96,6 +97,7 @@ function MainApp() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('login');
   const [publishModalOpen, setPublishModalOpen] = useState(false);
+  const [simulationModalOpen, setSimulationModalOpen] = useState(false);
 
   // Pagination & Cursor State
   const [pageSize, setPageSize] = useState(12);
@@ -452,6 +454,7 @@ function MainApp() {
             setCurrentTab('projects');
           }
         }}
+        onOpenSimulation={() => setSimulationModalOpen(true)}
       />
 
       {/* Main Content Area with mobile safe padding */}
@@ -1214,6 +1217,14 @@ function MainApp() {
           />
         )}
       </AnimatePresence>
+
+      <SimulationModal
+        isOpen={simulationModalOpen}
+        onClose={() => setSimulationModalOpen(false)}
+        onProjectsUpdated={() => {
+          refreshProjectsSubscription();
+        }}
+      />
 
     </div>
   );

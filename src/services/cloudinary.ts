@@ -363,45 +363,10 @@ export async function uploadToCloudinary(
     });
   }
 
-  // 3. Fallback simulator for preview & development mode when Cloudinary env is not set
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException('Téléversement annulé.', 'AbortError'));
-      return;
-    }
-
-    let progress = 0;
-    const interval = setInterval(() => {
-      if (signal?.aborted) {
-        clearInterval(interval);
-        reject(new DOMException('Téléversement annulé.', 'AbortError'));
-        return;
-      }
-
-      progress += Math.floor(Math.random() * 20) + 15;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        if (onProgress) onProgress(100);
-
-        // Generate a local blob URL for download or preview
-        const blobUrl = URL.createObjectURL(file);
-        const format = file.name.split('.').pop()?.toUpperCase() || 'ZIP';
-
-        setTimeout(() => {
-          resolve({
-            url: blobUrl,
-            publicId: `orax_local_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            bytes: file.size,
-            format: format,
-            originalFilename: file.name,
-          });
-        }, 100);
-      } else if (onProgress) {
-        onProgress(progress);
-      }
-    }, 60);
-  });
+  // 3. Reject if Cloudinary is not configured - Never use local mock blob URLs
+  throw new Error(
+    'Configuration Cloudinary absente : Les variables d\'environnement VITE_CLOUDINARY_CLOUD_NAME et VITE_CLOUDINARY_UPLOAD_PRESET doivent être configurées (ex. sur Netlify) pour téléverser de véritables fichiers partagés dans le cloud.'
+  );
 }
 
 /**

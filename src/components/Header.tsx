@@ -33,6 +33,7 @@ interface HeaderProps {
   onLogout: () => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  onOpenSimulation?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -44,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   searchQuery,
   onSearchChange,
+  onOpenSimulation,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -354,6 +356,20 @@ export const Header: React.FC<HeaderProps> = ({
                       Nouveau Projet
                     </button>
 
+                    {onOpenSimulation && (
+                      <button
+                        id="dropdown-simulation-btn"
+                        onClick={() => {
+                          setUserDropdownOpen(false);
+                          onOpenSimulation();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30 rounded-lg transition-colors"
+                      >
+                        <Sparkles className="w-4 h-4 text-emerald-400" />
+                        Tester Multi-Comptes (Simulation)
+                      </button>
+                    )}
+
                     {isAdmin && (
                       <button
                         id="dropdown-admin-btn"
@@ -501,6 +517,18 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <span>Mon Profil</span>
               <UserIcon className="w-4 h-4 text-cyan-400" />
+            </button>
+          )}
+          {onOpenSimulation && (
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenSimulation();
+              }}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium text-emerald-400 hover:bg-emerald-950/30"
+            >
+              <span>Tester Multi-Comptes (Simulation)</span>
+              <Sparkles className="w-4 h-4 text-emerald-400" />
             </button>
           )}
           {isAdmin && (

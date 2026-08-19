@@ -157,6 +157,17 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     }
   }, [project?.id, currentUser?.uid]);
 
+  // Keyboard shortcut (Escape to close project)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !showShareModal && !showBadgeModal) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, showShareModal, showBadgeModal]);
+
   if (!project) return null;
 
   const categoryInfo = getCategoryById(project.category);
@@ -453,7 +464,14 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+    <div 
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -562,12 +580,16 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
               </>
             )}
 
+            {/* Bouton Fermer Principal Header */}
             <button
+              type="button"
               id="btn-close-project-modal"
               onClick={onClose}
-              className="p-2 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors ml-1"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-rose-500/20 active:bg-rose-500/30 text-zinc-300 hover:text-rose-300 border border-zinc-700 hover:border-rose-500/40 transition-all font-mono text-xs font-semibold shadow-sm ml-1 cursor-pointer"
+              title="Fermer le projet (Échap)"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
+              <span>Fermer</span>
             </button>
           </div>
         </div>
@@ -1106,6 +1128,55 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             />
           )}
 
+        </div>
+
+        {/* Bottom Sticky Action Bar with clear "Fermer le projet" button */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 sm:px-8 py-3.5 border-t border-zinc-800 bg-zinc-950/95 shrink-0">
+          <div className="flex items-center gap-3 text-xs text-zinc-400 font-mono w-full sm:w-auto justify-between sm:justify-start">
+            <span className="flex items-center gap-1.5">
+              <Eye className="w-3.5 h-3.5 text-cyan-400" />
+              {currentViews} vue{currentViews > 1 ? 's' : ''}
+            </span>
+            <span className="text-zinc-700 hidden sm:inline">•</span>
+            <span className="flex items-center gap-1.5">
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              {currentDownloads} téléchargement{currentDownloads > 1 ? 's' : ''}
+            </span>
+            {project.version && (
+              <>
+                <span className="text-zinc-700 hidden sm:inline">•</span>
+                <span className="text-zinc-400 hidden sm:inline">Version {project.version}</span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+            <button
+              type="button"
+              id="btn-close-project-modal-bottom"
+              onClick={onClose}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800/90 hover:bg-zinc-700 active:bg-zinc-600 text-zinc-200 hover:text-white border border-zinc-700 font-mono text-xs sm:text-sm font-semibold transition-all shadow-sm cursor-pointer"
+              title="Fermer la vue de ce projet (Échap)"
+            >
+              <X className="w-4 h-4 text-zinc-400" />
+              <span>Fermer le projet</span>
+            </button>
+
+            <button
+              type="button"
+              id="btn-download-project-modal-bottom"
+              onClick={handleDownload}
+              disabled={downloading}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-mono text-xs sm:text-sm font-bold shadow-lg shadow-cyan-500/20 transition-all active:scale-95 cursor-pointer"
+            >
+              {downloading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>{downloading ? 'Téléchargement...' : 'Télécharger'}</span>
+            </button>
+          </div>
         </div>
       </motion.div>
 
