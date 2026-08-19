@@ -45,7 +45,8 @@ import {
   toggleFavoriteProject,
   isProjectFavorited,
   generateProjectSlug,
-  getProjectRatingDistribution
+  getProjectRatingDistribution,
+  checkIsAdmin
 } from '../services/firebase';
 import { StarRatingDisplay, PlayStoreRatingSection } from './PlayStoreRating';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -159,9 +160,9 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   if (!project) return null;
 
   const categoryInfo = getCategoryById(project.category);
-  const isLordDemon = project.developerName.toUpperCase().includes('LORD DEMON');
+  const isLordDemon = project.developerName.toUpperCase().includes('LORD DEMON') || project.ownerId === 'dev_lord_demon';
   const isCertified = isLordDemon || ((project.downloads || 0) >= 50 && (project.views || 0) >= 100);
-  const isOwner = currentUser && (currentUser.uid === project.ownerId || currentUser.uid === 'dev_lord_demon');
+  const isOwner = currentUser && (currentUser.uid === project.ownerId || currentUser.uid === 'dev_lord_demon' || checkIsAdmin(currentUser));
   const isFollowing = isFollowingDeveloper(project.developerName, currentUser) || isFollowingDeveloper(project.ownerId, currentUser);
   const isFavorited = isProjectFavorited(project.id, currentUser);
 

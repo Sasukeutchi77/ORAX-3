@@ -22,7 +22,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { UserProfile, CloudSyncState } from '../types';
-import { isFirebaseConfigured, subscribeToSyncStatus } from '../services/firebase';
+import { isFirebaseConfigured, subscribeToSyncStatus, checkIsAdmin } from '../services/firebase';
 
 interface HeaderProps {
   currentTab: string;
@@ -49,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState<CloudSyncState>('synced');
   const isCloudActive = isFirebaseConfigured();
+  const isAdmin = checkIsAdmin(currentUser);
 
   useEffect(() => {
     const unsub = subscribeToSyncStatus((status) => {
@@ -249,7 +250,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {currentUser && (currentUser.isAdmin || currentUser.email?.toLowerCase() === 'epargnelock@gmail.com') && (
+            {isAdmin && (
               <button
                 id="nav-admin-btn"
                 onClick={() => handleNavClick('admin')}
@@ -353,7 +354,7 @@ export const Header: React.FC<HeaderProps> = ({
                       Nouveau Projet
                     </button>
 
-                    {(currentUser.isAdmin || currentUser.email?.toLowerCase() === 'epargnelock@gmail.com') && (
+                    {isAdmin && (
                       <button
                         id="dropdown-admin-btn"
                         onClick={() => handleNavClick('admin')}
@@ -500,6 +501,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <span>Mon Profil</span>
               <UserIcon className="w-4 h-4 text-cyan-400" />
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => handleNavClick('admin')}
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium ${
+                currentTab === 'admin' ? 'text-cyan-400 bg-cyan-950/60 border border-cyan-500/40' : 'text-cyan-400 hover:bg-cyan-950/30'
+              }`}
+            >
+              <span>Console Admin LORD DEMON</span>
+              <ShieldCheck className="w-4 h-4 text-cyan-400" />
             </button>
           )}
         </div>

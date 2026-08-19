@@ -28,7 +28,7 @@ import {
 import { Project, UserProfile as UserProfileType } from '../types';
 import { ProjectCard } from './ProjectCard';
 import { formatFileSize, uploadAvatarToCloudinary } from '../services/cloudinary';
-import { updateUserProfile } from '../services/firebase';
+import { updateUserProfile, updateTrophiesPrivacy, togglePublishTrophy, setPinnedTrophy } from '../services/firebase';
 import { getUserCertification } from '../utils/certification';
 import { VerifiedBadge } from './VerifiedBadge';
 import { TrophiesDisplay } from './TrophiesDisplay';
@@ -185,6 +185,68 @@ export const UserProfile: React.FC<UserProfileProps> = ({
       });
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleToggleTrophiesPrivacy = async (newPrivacy: 'public' | 'private') => {
+    try {
+      const updated = await updateTrophiesPrivacy(newPrivacy, user);
+      if (onUpdateUser) onUpdateUser(updated);
+      showToast({
+        title: newPrivacy === 'public' ? 'Trophées Publics' : 'Trophées Privés',
+        message: newPrivacy === 'public' 
+          ? 'Vos trophées et accomplissements sont désormais visibles par tous les visiteurs.'
+          : 'Vos trophées et accomplissements sont désormais masqués aux visiteurs.',
+        type: 'success',
+      });
+    } catch (err: any) {
+      showToast({
+        title: 'Erreur',
+        message: err.message || 'Impossible de modifier la visibilité des trophées.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleTogglePublishTrophy = async (trophyId: string) => {
+    try {
+      const res = await togglePublishTrophy(trophyId, user);
+      if (onUpdateUser) onUpdateUser(res.user);
+      showToast({
+        title: res.isPublished ? 'Trophée Publié !' : 'Publication Retirée',
+        message: res.isPublished 
+          ? 'Ce trophée est maintenant mis en avant dans vos accomplissements publics.'
+          : 'Ce trophée a été retiré de votre vitrine.',
+        type: 'success',
+      });
+    } catch (err: any) {
+      showToast({
+        title: 'Erreur',
+        message: err.message || 'Impossible de mettre à jour le statut du trophée.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleTogglePinTrophy = async (trophyId: string) => {
+    try {
+      const isCurrentlyPinned = user.pinnedTrophyId === trophyId;
+      const newPinned = isCurrentlyPinned ? null : trophyId;
+      const updated = await setPinnedTrophy(newPinned, user);
+      if (onUpdateUser) onUpdateUser(updated);
+      showToast({
+        title: newPinned ? 'Trophée Épinglé !' : 'Trophée Détaché',
+        message: newPinned 
+          ? 'Ce trophée est maintenant épinglé en tête de votre profil.'
+          : 'Le trophée a été détaché de l\'en-tête.',
+        type: 'success',
+      });
+    } catch (err: any) {
+      showToast({
+        title: 'Erreur',
+        message: err.message || 'Impossible d\'épingler ce trophée.',
+        type: 'error',
+      });
     }
   };
 
@@ -555,7 +617,17 @@ export const UserProfile: React.FC<UserProfileProps> = ({
       </div>
 
       {/* Gamification & Trophies System Section */}
-      <TrophiesDisplay user={user} userProjects={userProjects} />
+      <TrophiesDisplay 
+        user={user} 
+        userProjects={userProjects} 
+        isOwner={true}
+        privacy={user.trophiesPrivacy || 'public'}
+        onTogglePrivacy={handleToggleTrophiesPrivacy}
+        onTogglePublishTrophy={handleTogglePublishTrophy}
+        onTogglePinTrophy={handleTogglePinTrophy}
+        publishedTrophies={user.publishedTrophies || []}
+        pinnedTrophyId={user.pinnedTrophyId}
+      />
 
       {/* Projects Management Section */}
       <div className="space-y-6">

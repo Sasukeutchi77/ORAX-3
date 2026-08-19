@@ -368,7 +368,11 @@ export const DeveloperProfileModal: React.FC<DeveloperProfileModalProps> = ({
               <TrophiesDisplay 
                 developerName={devInfo.name} 
                 userProjects={devInfo.projects} 
-                compact={true} 
+                compact={false} 
+                isOwner={Boolean(currentUser && (currentUser.displayName.toLowerCase() === devInfo.name.toLowerCase() || currentUser.uid === devInfo.id))}
+                privacy={devInfo.trophiesPrivacy || (currentUser && (currentUser.displayName.toLowerCase() === devInfo.name.toLowerCase() || currentUser.uid === devInfo.id) ? currentUser.trophiesPrivacy : 'public')}
+                publishedTrophies={devInfo.publishedTrophies || []}
+                pinnedTrophyId={devInfo.pinnedTrophyId}
               />
             </div>
           </div>

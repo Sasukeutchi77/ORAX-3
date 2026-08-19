@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Project, UserProfile } from '../types';
 import { ProjectCard } from './ProjectCard';
+import { TrophiesDisplay } from './TrophiesDisplay';
 import { formatFileSize } from '../services/cloudinary';
 import { getUserCertification } from '../utils/certification';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -41,8 +42,8 @@ export const DeveloperDashboard: React.FC<DeveloperDashboardProps> = ({
   onEditProject,
   onSelectProject,
 }) => {
-  const isLordDemon = user.displayName.toUpperCase().includes('LORD DEMON') || user.uid === 'dev_lord_demon';
   const certStats = getUserCertification(user, userProjects);
+  const isLordDemon = certStats.isLordDemon || user.displayName.toUpperCase().includes('LORD DEMON') || user.uid === 'dev_lord_demon';
 
   // Stats computation
   const totalProjects = userProjects.length;
@@ -150,6 +151,14 @@ export const DeveloperDashboard: React.FC<DeveloperDashboardProps> = ({
           <p className="text-[11px] text-zinc-500">Ajoutés en favoris par les devs</p>
         </div>
       </div>
+
+      {/* Gamification & Trophies Preview in Dashboard */}
+      <TrophiesDisplay 
+        user={user} 
+        userProjects={userProjects} 
+        isOwner={true} 
+        compact={true} 
+      />
 
       {/* Top Performing Projects & Quick Update Action */}
       <div className="space-y-6">

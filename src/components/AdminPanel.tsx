@@ -31,7 +31,8 @@ import {
   deleteExistingProject,
   isFirebaseConfigured,
   getFirebaseConfigDiagnostic,
-  formatFileSize
+  formatFileSize,
+  checkIsAdmin
 } from '../services/firebase';
 import { getCloudinaryConfigDiagnostic } from '../services/cloudinary';
 
@@ -59,7 +60,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [diagnostic, setDiagnostic] = useState<FirebaseConfigDiagnostic>(getFirebaseConfigDiagnostic());
   const [cloudinaryDiag, setCloudinaryDiag] = useState<CloudinaryConfigDiagnostic>(getCloudinaryConfigDiagnostic());
 
-  const isAdmin = currentUser?.isAdmin || currentUser?.email?.toLowerCase() === 'epargnelock@gmail.com';
+  const isAdmin = checkIsAdmin(currentUser);
   const isCloud = isFirebaseConfigured();
 
   // Load reports

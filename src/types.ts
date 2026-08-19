@@ -94,6 +94,9 @@ export interface DeveloperInfo {
   followersCount: number;
   isLordDemon: boolean;
   isCertified: boolean;
+  trophiesPrivacy?: 'public' | 'private';
+  pinnedTrophyId?: string;
+  publishedTrophies?: string[];
   projects: Project[];
 }
 
@@ -113,6 +116,9 @@ export interface UserProfile {
   followersCount?: number;
   isAdmin?: boolean;
   isCertified?: boolean;
+  trophiesPrivacy?: 'public' | 'private';
+  pinnedTrophyId?: string;
+  publishedTrophies?: string[]; // Array of trophy IDs published by the user
 }
 
 export type SortOption = 'recent' | 'oldest' | 'downloads' | 'popular' | 'rating' | 'alpha';

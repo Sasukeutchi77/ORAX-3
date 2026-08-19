@@ -2771,6 +2771,7 @@ export function getDeveloperInfo(
   const fallbackRatingsCount = totalRatingsCount;
 
   const isCertified = isLordDemon || devProjects.some(p => (p.downloads || 0) >= 50 && (p.views || 0) >= 100);
+  const privacy = getDeveloperTrophiesPrivacy(target, devProjects[0]?.ownerId);
 
   return {
     id: devProjects[0]?.ownerId || target,
@@ -2788,7 +2789,138 @@ export function getDeveloperInfo(
     followersCount: isLordDemon ? 142 : Math.max(1, devProjects.length * 3),
     isLordDemon,
     isCertified,
+    trophiesPrivacy: privacy,
+    pinnedTrophyId: isLordDemon ? 'trophy_legendary_lord' : undefined,
+    publishedTrophies: isLordDemon ? ['trophy_legendary_lord', 'trophy_verified_creator', 'trophy_download_titan'] : [],
     projects: devProjects,
   };
 }
+
+// --------------------------------------------------------------------------
+// TROPHIES PRIVACY & SHOWCASE SHARING HELPERS
+// --------------------------------------------------------------------------
+const STORAGE_KEY_TROPHIES_PRIVACY = 'orax_trophies_privacy_map';
+
+export function getDeveloperTrophiesPrivacy(developerIdentifier?: string, ownerId?: string): 'public' | 'private' {
+  if (!developerIdentifier && !ownerId) return 'public';
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_TROPHIES_PRIVACY);
+    if (raw) {
+      const map: Record<string, 'public' | 'private'> = JSON.parse(raw);
+      if (ownerId && map[ownerId]) return map[ownerId];
+      if (developerIdentifier && map[developerIdentifier.trim().toLowerCase()]) {
+        return map[developerIdentifier.trim().toLowerCase()];
+      }
+    }
+  } catch {}
+  return 'public';
+}
+
+export function saveLocalTrophiesPrivacy(uid: string, displayName: string, privacy: 'public' | 'private'): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_TROPHIES_PRIVACY);
+    const map: Record<string, 'public' | 'private'> = raw ? JSON.parse(raw) : {};
+    if (uid) map[uid] = privacy;
+    if (displayName) map[displayName.trim().toLowerCase()] = privacy;
+    localStorage.setItem(STORAGE_KEY_TROPHIES_PRIVACY, JSON.stringify(map));
+  } catch {}
+}
+
+export async function updateTrophiesPrivacy(
+  privacy: 'public' | 'private',
+  user: UserProfile
+): Promise<UserProfile> {
+  const updatedUser: UserProfile = {
+    ...user,
+    trophiesPrivacy: privacy,
+  };
+
+  // 1. Authoritative Firestore update
+  if (db && isFirebaseConfigured() && user.uid) {
+    updateSyncStatus('syncing');
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        trophiesPrivacy: privacy,
+        updatedAt: new Date().toISOString(),
+      });
+      updateSyncStatus('synced');
+    } catch (err: any) {
+      updateSyncStatus('error');
+      console.warn('Firestore updateTrophiesPrivacy warning:', err);
+    }
+  }
+
+  // 2. Save locally
+  saveLocalTrophiesPrivacy(user.uid, user.displayName, privacy);
+  saveCachedSession(updatedUser);
+
+  return updatedUser;
+}
+
+export async function togglePublishTrophy(
+  trophyId: string,
+  user: UserProfile
+): Promise<{ isPublished: boolean; user: UserProfile }> {
+  const currentList = user.publishedTrophies || [];
+  const isAlreadyPublished = currentList.includes(trophyId);
+  const updatedPublished = isAlreadyPublished
+    ? currentList.filter(id => id !== trophyId)
+    : [...currentList, trophyId];
+
+  const updatedUser: UserProfile = {
+    ...user,
+    publishedTrophies: updatedPublished,
+  };
+
+  // 1. Authoritative Firestore update
+  if (db && isFirebaseConfigured() && user.uid) {
+    updateSyncStatus('syncing');
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        publishedTrophies: updatedPublished,
+        updatedAt: new Date().toISOString(),
+      });
+      updateSyncStatus('synced');
+    } catch (err: any) {
+      updateSyncStatus('error');
+      console.warn('Firestore togglePublishTrophy warning:', err);
+    }
+  }
+
+  // 2. Save locally
+  saveCachedSession(updatedUser);
+
+  return { isPublished: !isAlreadyPublished, user: updatedUser };
+}
+
+export async function setPinnedTrophy(
+  trophyId: string | null,
+  user: UserProfile
+): Promise<UserProfile> {
+  const updatedUser: UserProfile = {
+    ...user,
+    pinnedTrophyId: trophyId || undefined,
+  };
+
+  if (db && isFirebaseConfigured() && user.uid) {
+    updateSyncStatus('syncing');
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        pinnedTrophyId: trophyId || null,
+        updatedAt: new Date().toISOString(),
+      });
+      updateSyncStatus('synced');
+    } catch (err: any) {
+      updateSyncStatus('error');
+      console.warn('Firestore setPinnedTrophy warning:', err);
+    }
+  }
+
+  saveCachedSession(updatedUser);
+  return updatedUser;
+}
+
 

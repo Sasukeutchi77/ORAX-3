@@ -34,7 +34,8 @@ import {
   isFollowingDeveloper,
   getDevelopersLeaderboard,
   toggleFavoriteProject,
-  isProjectFavorited
+  isProjectFavorited,
+  checkIsAdmin
 } from './services/firebase';
 import { 
   Flame, 
@@ -177,6 +178,12 @@ function MainApp() {
         if (devName) {
           setSelectedDeveloper(devName);
         }
+      } else if (hash.startsWith('#trophy/')) {
+        const parts = hash.replace('#trophy/', '').split('/');
+        const devName = decodeURIComponent(parts[0] || '').trim();
+        if (devName) {
+          setSelectedDeveloper(devName);
+        }
       }
     };
 
@@ -186,7 +193,7 @@ function MainApp() {
   }, [projects]);
 
   // Is current user admin
-  const isAdmin = currentUser?.isAdmin || currentUser?.email?.toLowerCase() === 'epargnelock@gmail.com';
+  const isAdmin = checkIsAdmin(currentUser);
 
   // Helper to test if a developer is followed by the current user
   const checkIsFollowed = (devName: string, ownerId?: string) => {
