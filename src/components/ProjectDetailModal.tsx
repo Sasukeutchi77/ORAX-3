@@ -48,6 +48,9 @@ import {
   getProjectRatingDistribution
 } from '../services/firebase';
 import { StarRatingDisplay, PlayStoreRatingSection } from './PlayStoreRating';
+import { VerifiedBadge } from './VerifiedBadge';
+import { GithubBadgeModal } from './GithubBadgeModal';
+import { ShareModal } from './ShareModal';
 import { triggerProjectDownload } from '../utils/downloadHelper';
 import { useToast } from './Toast';
 import confetti from 'canvas-confetti';
@@ -96,7 +99,11 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   const [commentRating, setCommentRating] = useState<number>(5);
   const [submittingComment, setSubmittingComment] = useState(false);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'details' | 'comments'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'releases' | 'comments'>('details');
+
+  // Modals
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showBadgeModal, setShowBadgeModal] = useState(false);
 
   // Follow & Favorite States
   const [followLoading, setFollowLoading] = useState(false);
@@ -153,6 +160,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
 
   const categoryInfo = getCategoryById(project.category);
   const isLordDemon = project.developerName.toUpperCase().includes('LORD DEMON');
+  const isCertified = isLordDemon || ((project.downloads || 0) >= 50 && (project.views || 0) >= 100);
   const isOwner = currentUser && (currentUser.uid === project.ownerId || currentUser.uid === 'dev_lord_demon');
   const isFollowing = isFollowingDeveloper(project.developerName, currentUser) || isFollowingDeveloper(project.ownerId, currentUser);
   const isFavorited = isProjectFavorited(project.id, currentUser);
@@ -483,15 +491,37 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
               <span className="hidden xs:inline">{isFavorited ? 'Favori' : 'Ajouter aux favoris'}</span>
             </button>
 
+            {/* Bouton Générateur de Badge GitHub */}
+            <button
+              id="btn-github-badge-modal"
+              onClick={() => setShowBadgeModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-cyan-950/80 text-cyan-300 border border-zinc-700 hover:border-cyan-500/40 text-xs font-mono font-semibold transition-all shadow-sm"
+              title="Générer un badge dynamique pour README GitHub"
+            >
+              <Code2 className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">Badge GitHub</span>
+            </button>
+
+            {/* Bouton Partager Rapide */}
+            <button
+              id="btn-share-project-modal"
+              onClick={() => setShowShareModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-mono font-semibold transition-all shadow-sm"
+              title="Partager sur les réseaux sociaux"
+            >
+              <Share2 className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Partager</span>
+            </button>
+
             {/* Clean URL / Share Button */}
             <button
               id="btn-copy-project-link"
               onClick={handleCopyLink}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 text-xs transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 text-xs transition-colors"
               title="Copier l'URL propre du projet"
             >
               {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />}
-              <span className="hidden sm:inline font-mono">URL Propre</span>
+              <span className="hidden sm:inline font-mono">Lien</span>
             </button>
 
             {onReport && (
@@ -541,11 +571,11 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs (Description vs Notes et Avis Play Store) */}
-        <div className="flex items-center gap-1 px-5 sm:px-8 border-b border-zinc-800 bg-zinc-950/40 shrink-0">
+        {/* Navigation Tabs (Description vs Versions vs Notes et Avis Play Store) */}
+        <div className="flex items-center gap-1 px-5 sm:px-8 border-b border-zinc-800 bg-zinc-950/40 shrink-0 overflow-x-auto">
           <button
             onClick={() => setActiveTab('details')}
-            className={`px-4 py-3 text-xs sm:text-sm font-bold font-mono border-b-2 transition-all flex items-center gap-2 ${
+            className={`px-4 py-3 text-xs sm:text-sm font-bold font-mono border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'details'
                 ? 'border-cyan-400 text-cyan-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -556,8 +586,20 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('releases')}
+            className={`px-4 py-3 text-xs sm:text-sm font-bold font-mono border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'releases'
+                ? 'border-emerald-400 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            <span>Versions & Changelog ({project.releases && project.releases.length > 0 ? project.releases.length : 1})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('comments')}
-            className={`px-4 py-3 text-xs sm:text-sm font-bold font-mono border-b-2 transition-all flex items-center gap-2 ${
+            className={`px-4 py-3 text-xs sm:text-sm font-bold font-mono border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'comments'
                 ? 'border-amber-400 text-amber-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -598,6 +640,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                   >
                     <User className={`w-4 h-4 ${isLordDemon ? 'text-cyan-400' : 'text-zinc-400'}`} />
                     <span className="tracking-wide">{project.developerName}</span>
+                    <VerifiedBadge isCertified={isCertified} isLordDemon={isLordDemon} size="sm" />
                     {isLordDemon && (
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-extrabold bg-cyan-500/30 text-cyan-200 border border-cyan-400/60 shadow-sm flex items-center gap-1">
                         <Sparkles className="w-3 h-3 text-cyan-300" />
@@ -773,6 +816,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                     <div className="text-xs font-mono text-zinc-400 font-medium">Développeur & Concepteur :</div>
                     <div className="text-lg sm:text-xl font-extrabold text-white font-mono flex items-center gap-2 mt-0.5">
                       <span>{project.developerName}</span>
+                      <VerifiedBadge isCertified={isCertified} isLordDemon={isLordDemon} size="sm" showLabel={true} labelText={isCertified ? 'Développeur Certifié' : undefined} />
                       {isLordDemon && (
                         <span className="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold bg-cyan-500/30 text-cyan-300 border border-cyan-400/60 flex items-center gap-1 shadow-sm">
                           <Sparkles className="w-3 h-3 text-cyan-300" />
@@ -783,7 +827,9 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                     <p className="text-xs text-zinc-400 mt-1">
                       {isLordDemon 
                         ? 'Fondateur & Lead Developer officiel de la plateforme ORAX PROJET.' 
-                        : `Développeur vérifié sur l'écosystème ORAX PROJET.`}
+                        : (isCertified 
+                            ? 'Développeur Certifié ORAX (+50 téléchargements et +100 vues atteints).' 
+                            : 'Développeur sur l\'écosystème ORAX PROJET.')}
                     </p>
                   </div>
                 </div>
@@ -884,7 +930,166 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             </div>
           )}
 
-          {/* Tab 2: Full Google Play Store Ratings & Reviews System */}
+          {/* Tab 2: Interactive Releases & Changelog History */}
+          {activeTab === 'releases' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+                <div>
+                  <h3 className="text-lg font-bold text-white font-mono flex items-center gap-2">
+                    <Layers className="w-5 h-5 text-emerald-400" />
+                    <span>Historique des Versions & Changelog</span>
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Consultez l'historique complet des publications et téléchargez les versions antérieures.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBadgeModal(true)}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-cyan-950 text-cyan-300 border border-zinc-700 hover:border-cyan-500/40 text-xs font-mono font-semibold transition-all flex items-center gap-1.5"
+                  >
+                    <Code2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Badge GitHub</span>
+                  </button>
+
+                  {isOwner && onEdit && (
+                    <button
+                      type="button"
+                      onClick={() => onEdit(project)}
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-mono font-bold transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Nouvelle Version</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Version History List */}
+              <div className="space-y-4">
+                {/* 1. Latest / Current active version */}
+                <div className="p-5 rounded-2xl bg-gradient-to-br from-zinc-900 via-zinc-900 to-emerald-950/30 border-2 border-emerald-500/40 shadow-xl relative overflow-hidden">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/80 pb-3">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="px-3 py-1 rounded-xl text-xs font-mono font-extrabold bg-emerald-500 text-zinc-950 shadow-sm flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        v{project.version || '1.0.0'} (Actuelle)
+                      </span>
+                      <span className="text-sm font-bold text-white font-mono">
+                        {project.releases && project.releases[0]?.title 
+                          ? project.releases[0].title 
+                          : `Version ${project.version || '1.0.0'}`}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+                      <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                      <span>{formatDate(project.updatedAt || project.createdAt)}</span>
+                    </div>
+                  </div>
+
+                  {/* Release Notes */}
+                  <div className="mt-3 text-sm text-zinc-300 whitespace-pre-line leading-relaxed bg-zinc-950/60 p-3.5 rounded-xl border border-zinc-800/60 font-sans">
+                    {project.releases && project.releases[0]?.changelog 
+                      ? project.releases[0].changelog 
+                      : (project.description.includes('### 🚀 Nouveautés') 
+                          ? project.description.split('### 🚀 Nouveautés')[1]?.trim() 
+                          : 'Dernière mise à jour stable avec toutes les améliorations récentes.')}
+                  </div>
+
+                  {/* Actions for current version */}
+                  <div className="mt-4 pt-3 border-t border-zinc-800/60 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+                    <div className="flex items-center gap-4 text-zinc-400">
+                      <span className="flex items-center gap-1">
+                        <HardDrive className="w-3.5 h-3.5 text-zinc-500" />
+                        {formatFileSize(project.fileSize)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Download className="w-3.5 h-3.5 text-emerald-400" />
+                        {currentDownloads} téléchargements
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleDownload}
+                      disabled={downloading}
+                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition-all"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Télécharger v{project.version || '1.0.0'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Historical Previous Versions (if any) */}
+                {project.releases && project.releases.length > 1 && (
+                  <div className="space-y-3 pt-2">
+                    <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-400">
+                      Versions Antérieures ({project.releases.length - 1})
+                    </h4>
+
+                    {project.releases.slice(1).map((rel, idx) => (
+                      <div
+                        key={idx}
+                        className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 hover:border-zinc-700 transition-all space-y-2.5"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold bg-zinc-800 text-zinc-300 border border-zinc-700">
+                              v{rel.version}
+                            </span>
+                            <span className="text-xs sm:text-sm font-semibold text-zinc-200 font-mono">
+                              {rel.title || `Version ${rel.version}`}
+                            </span>
+                          </div>
+
+                          <span className="text-xs font-mono text-zinc-500">
+                            {formatDate(rel.releaseDate)}
+                          </span>
+                        </div>
+
+                        {rel.changelog && (
+                          <p className="text-xs text-zinc-400 bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-800/50 whitespace-pre-line font-sans">
+                            {rel.changelog}
+                          </p>
+                        )}
+
+                        <div className="flex items-center justify-between gap-2 pt-1 text-xs font-mono">
+                          <span className="text-zinc-500">
+                            Poids : {formatFileSize(rel.fileSize || 0)}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (rel.fileUrl) {
+                                triggerProjectDownload({
+                                  ...project,
+                                  fileUrl: rel.fileUrl,
+                                  fileName: rel.fileName || `${project.name}-v${rel.version}.zip`
+                                });
+                              } else {
+                                handleDownload();
+                              }
+                            }}
+                            className="px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-cyan-300 hover:text-white border border-zinc-700 transition-all flex items-center gap-1"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Télécharger v{rel.version}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Tab 3: Full Google Play Store Ratings & Reviews System */}
           {activeTab === 'comments' && (
             <PlayStoreRatingSection
               project={project}
@@ -902,6 +1107,24 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
 
         </div>
       </motion.div>
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <ShareModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          project={project}
+        />
+      )}
+
+      {/* GitHub Dynamic Badge Modal */}
+      {showBadgeModal && (
+        <GithubBadgeModal
+          isOpen={showBadgeModal}
+          onClose={() => setShowBadgeModal(false)}
+          project={project}
+        />
+      )}
     </div>
   );
 };

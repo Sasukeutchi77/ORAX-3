@@ -220,7 +220,11 @@ export function subscribeToSyncStatus(callback: (status: CloudSyncState) => void
 }
 
 // Admin email configured for LORD DEMON admin privileges
-const ADMIN_EMAILS = new Set(['epargnelock@gmail.com', 'lord.demon.dev@orax.net']);
+const ADMIN_EMAILS = new Set([
+  'epargnelock@gmail.com',
+  'lord.demon.dev@orax.net',
+  'mikeysano45t@gmail.com'
+]);
 
 export function checkIsAdmin(
   user: UserProfile | { email?: string; uid?: string; isAdmin?: boolean } | null,
@@ -228,6 +232,8 @@ export function checkIsAdmin(
 ): boolean {
   if (!user) return false;
   if (hasCustomClaimAdmin === true) return true;
+  if (user.isAdmin === true) return true;
+  if (user.uid === 'dev_lord_demon') return true;
   if (user.email && ADMIN_EMAILS.has(user.email.toLowerCase())) return true;
   return false;
 }
@@ -435,6 +441,13 @@ export async function registerUser(
   const finalPhotoURL = customPhotoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanDisplayName || cleanEmail)}`;
   const isAdmin = ADMIN_EMAILS.has(cleanEmail);
 
+  if (!isAdmin) {
+    const lowerName = cleanDisplayName.toLowerCase();
+    if (lowerName.includes('lord demon') || lowerName.includes('lorddemon') || lowerName === 'admin' || lowerName.includes('fondateur orax')) {
+      throw new Error('Le nom "Lord Demon" ou "Admin" est réservé exclusivement au fondateur et administrateur officiel ORAX.');
+    }
+  }
+
   try {
     const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
     
@@ -538,60 +551,100 @@ export async function updateUserProfile(
   updates: Partial<UserProfile>
 ): Promise<UserProfile> {
   const authUser = auth?.currentUser;
-  if (!authUser || (authUser.uid !== userId && !checkIsAdmin({ email: authUser.email || '', uid: authUser.uid }))) {
+  const currentSession = getCachedSession();
+
+  const effectiveUid = authUser?.uid || currentSession?.uid || userId;
+  const effectiveEmail = authUser?.email || currentSession?.email || '';
+  const isAdmin = checkIsAdmin({ email: effectiveEmail, uid: effectiveUid, isAdmin: currentSession?.isAdmin });
+  const isAuthorized = (effectiveUid === userId) || (authUser?.uid === userId) || (currentSession?.uid === userId) || isAdmin;
+
+  if (!isAuthorized) {
     throw new Error('Vous n\'êtes pas autorisé à modifier ce profil.');
   }
 
-  const isAdmin = checkIsAdmin({ email: authUser.email || '', uid: authUser.uid });
-
   // Security: Prevent privilege escalation and immutable UID modification
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { isAdmin: _attemptedAdmin, uid: _ignoredUid, ...safeUpdates } = updates;
-  const currentSession = getCachedSession();
+  const { isAdmin: _attemptedAdmin, uid: _ignoredUid, isCertified: _ignoredCert, ...safeUpdates } = updates as any;
+
+  // Anti-spoofing: Reserve Founder and Admin titles for verified admins only
+  if (safeUpdates.displayName && !isAdmin) {
+    const cleanName = safeUpdates.displayName.trim().toLowerCase();
+    if (cleanName.includes('lord demon') || cleanName.includes('lorddemon') || cleanName === 'admin' || cleanName.includes('fondateur orax')) {
+      throw new Error('Le nom "Lord Demon" ou "Admin" est réservé exclusivement au fondateur et administrateur officiel ORAX.');
+    }
+  }
 
   const updatedProfile: UserProfile = {
     ...(currentSession || {
       uid: userId,
-      email: authUser.email || '',
-      displayName: authUser.displayName || 'Dev',
+      email: effectiveEmail,
+      displayName: authUser?.displayName || 'Dev',
       createdAt: new Date().toISOString(),
     }),
     ...safeUpdates,
     uid: userId,
-    isAdmin,
+    isAdmin: isAdmin || Boolean(currentSession?.isAdmin),
   };
 
-  // 1. Update Firebase Auth if user is currently logged in
-  if (authUser.uid === userId) {
-    try {
-      const authUpdates: { displayName?: string; photoURL?: string } = {};
-      if (safeUpdates.displayName) authUpdates.displayName = safeUpdates.displayName;
-      if (safeUpdates.photoURL) authUpdates.photoURL = safeUpdates.photoURL;
-      if (Object.keys(authUpdates).length > 0) {
-        await updateProfile(authUser, authUpdates);
-      }
-    } catch (err) {
-      console.warn('Firebase Auth updateProfile warning:', err);
-    }
-  }
-
-  // 2. Update Firestore document (Source of Truth)
-  if (db && isFirebaseConfigured()) {
-    try {
-      await setDoc(doc(db, 'users', userId), sanitizeForFirestore(updatedProfile), { merge: true });
-    } catch (err: any) {
-      throw new Error(err?.message || 'Échec de la mise à jour du profil sur Firestore.');
-    }
-  }
-
+  // Immediate local cache write for instant UI feedback (0ms latency)
   if (updatedProfile.favorites) {
     saveLocalFavorites(updatedProfile.favorites);
   }
   if (updatedProfile.following) {
     saveLocalFollowing(updatedProfile.following);
   }
-
   saveCachedSession(updatedProfile);
+
+  // Parallel asynchronous remote updates to avoid blocking sequential HTTP requests
+  const networkTasks: Promise<any>[] = [];
+
+  // 1. Firebase Auth profile update
+  if (authUser && (authUser.uid === userId || isAdmin)) {
+    const authUpdates: { displayName?: string; photoURL?: string } = {};
+    if (safeUpdates.displayName) authUpdates.displayName = safeUpdates.displayName;
+    if (safeUpdates.photoURL !== undefined) authUpdates.photoURL = safeUpdates.photoURL;
+    if (Object.keys(authUpdates).length > 0) {
+      networkTasks.push(
+        updateProfile(authUser, authUpdates).catch((err) => {
+          console.warn('Firebase Auth updateProfile async warning:', err);
+        })
+      );
+    }
+  }
+
+  // 2. Firestore Document Update
+  if (db && isFirebaseConfigured()) {
+    const payload: Record<string, any> = {
+      ...sanitizeForFirestore(safeUpdates),
+      uid: userId,
+      updatedAt: new Date().toISOString(),
+    };
+    if (currentSession?.createdAt) {
+      payload.createdAt = currentSession.createdAt;
+    }
+
+    const firestorePromise = setDoc(doc(db, 'users', userId), payload, { merge: true })
+      .catch(async (err: any) => {
+        console.warn('Firestore user profile update warning, trying shallow update:', err);
+        try {
+          await updateDoc(doc(db, 'users', userId), sanitizeForFirestore(safeUpdates));
+        } catch (fallbackErr: any) {
+          console.warn('Firestore user profile fallback update error:', fallbackErr);
+        }
+      });
+
+    networkTasks.push(firestorePromise);
+  }
+
+  // Await network tasks with a fast timeout safety guarantee (max 1.5s)
+  if (networkTasks.length > 0) {
+    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+    await Promise.race([
+      Promise.allSettled(networkTasks),
+      timeoutPromise
+    ]);
+  }
+
   return updatedProfile;
 }
 
@@ -1205,10 +1258,19 @@ export async function saveNewProject(projectData: Omit<Project, 'id' | 'createdA
   const newId = `orax_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date().toISOString();
   const slug = generateProjectSlug(projectData.name, newId);
+  const isAdmin = checkIsAdmin({ email: currentAuthUser?.email || '', uid: verifiedOwnerId });
+
+  let developerName = (projectData.developerName || currentAuthUser?.displayName || 'Développeur').trim();
+  if (!isAdmin) {
+    const lower = developerName.toLowerCase();
+    if (lower.includes('lord demon') || lower.includes('lorddemon') || lower === 'admin' || lower.includes('fondateur orax')) {
+      developerName = currentAuthUser?.displayName || 'Développeur';
+    }
+  }
 
   const searchKeywords = generateSearchTokens({
     name: projectData.name,
-    developerName: projectData.developerName,
+    developerName,
     description: projectData.description,
     shortDescription: projectData.shortDescription,
     category: projectData.category,
@@ -1220,6 +1282,7 @@ export async function saveNewProject(projectData: Omit<Project, 'id' | 'createdA
     ...projectData,
     id: newId,
     slug,
+    developerName,
     ownerId: verifiedOwnerId, // Strictly identified by Firebase Auth UID
     ownerEmail: currentAuthUser?.email || projectData.ownerEmail || '',
     status: projectData.status || 'published',
@@ -1272,9 +1335,31 @@ export async function updateExistingProject(id: string, updates: Partial<Project
     throw new Error('Vous n\'êtes pas autorisé à modifier ce projet (seul le propriétaire UID ou l\'administrateur peut modifier).');
   }
 
-  // Security: Prevent tampering with immutable identifiers
+  // Security: Prevent tampering with immutable identifiers and protected stats
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { ownerId: _ignoredOwnerId, createdAt: _ignoredCreatedAt, id: _ignoredId, ...safeUpdates } = updates;
+  const { 
+    ownerId: _ignoredOwnerId, 
+    createdAt: _ignoredCreatedAt, 
+    id: _ignoredId,
+    downloads: _attemptedDownloads,
+    views: _attemptedViews,
+    rating: _attemptedRating,
+    ratingsCount: _attemptedRatingsCount,
+    favoritesCount: _attemptedFavs,
+    isCertified: _attemptedCert,
+    ...cleanUpdates 
+  } = updates as any;
+
+  // Non-admins cannot alter metrics directly via updateExistingProject
+  const safeUpdates = isAdmin ? updates : cleanUpdates;
+
+  // Anti-spoofing: prevent non-admins from impersonating Lord Demon
+  if (safeUpdates.developerName && !isAdmin) {
+    const lower = safeUpdates.developerName.toLowerCase();
+    if (lower.includes('lord demon') || lower.includes('lorddemon') || lower === 'admin' || lower.includes('fondateur orax')) {
+      delete safeUpdates.developerName;
+    }
+  }
 
   const now = new Date().toISOString();
   
@@ -1510,6 +1595,14 @@ export async function recordProjectDownload(
   const index = projects.findIndex(p => p.id === id);
   const targetProject = index !== -1 ? projects[index] : null;
 
+  // Anti-fraud: A developer cannot artificially inflate downloads on their own project
+  if (targetProject && auth?.currentUser?.uid && targetProject.ownerId === auth.currentUser.uid) {
+    return {
+      downloads: targetProject.downloads || 0,
+      isNew: false,
+    };
+  }
+
   // 1. Fast local check to avoid redundant network hits
   if (hasUserDownloadedProjectLocally(id, visitorId)) {
     return {
@@ -1656,6 +1749,14 @@ export async function recordProjectView(
   const projects = getLocalProjects();
   const index = projects.findIndex(p => p.id === id);
   const targetProject = index !== -1 ? projects[index] : null;
+
+  // Anti-fraud: A developer viewing their own project does not inflate their view count
+  if (targetProject && auth?.currentUser?.uid && targetProject.ownerId === auth.currentUser.uid) {
+    return {
+      views: targetProject.views || 1,
+      isNew: false,
+    };
+  }
 
   // 1. Fast local check
   if (hasUserViewedProjectLocally(id, visitorId)) {
@@ -2550,8 +2651,10 @@ export function getDevelopersLeaderboard(allProjects: Project[]): DeveloperInfo[
   const devMap: Record<string, { name: string; isLord: boolean; projects: Project[] }> = {};
 
   allProjects.forEach(project => {
-    const name = project.developerName.trim();
-    const isLord = name.toUpperCase().includes('LORD DEMON') || project.ownerId === 'dev_lord_demon';
+    const name = (project.developerName || 'Développeur').trim();
+    const isLord =
+      project.ownerId === 'dev_lord_demon' ||
+      Boolean(project.ownerEmail && ADMIN_EMAILS.has(project.ownerEmail.toLowerCase()));
     const key = isLord ? 'LORD DEMON' : name.toLowerCase();
 
     if (!devMap[key]) {
@@ -2585,10 +2688,12 @@ export function getDevelopersLeaderboard(allProjects: Project[]): DeveloperInfo[
       ? parseFloat((totalScore / totalRatingsCount).toFixed(1))
       : 0;
 
+    const isCertified = devGroup.isLord || devGroup.projects.some(p => (p.downloads || 0) >= 50 && (p.views || 0) >= 100);
+
     return {
       id: devGroup.projects[0]?.ownerId || devGroup.name,
       name: devGroup.name,
-      role: devGroup.isLord ? 'Fondateur & Développeur' : 'Développeur',
+      role: devGroup.isLord ? 'Fondateur & Développeur' : (isCertified ? 'Développeur Certifié' : 'Développeur'),
       photoURL: devGroup.isLord
         ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=80'
         : (devGroup.projects[0]?.thumbnail || undefined),
@@ -2600,6 +2705,7 @@ export function getDevelopersLeaderboard(allProjects: Project[]): DeveloperInfo[
       ratingsCount: totalRatingsCount,
       followersCount: devGroup.isLord ? 142 : Math.max(1, devGroup.projects.length * 3),
       isLordDemon: devGroup.isLord,
+      isCertified,
       projects: devGroup.projects,
     };
   });
@@ -2622,18 +2728,24 @@ export function getDeveloperInfo(
   developerIdentifier: string,
   allProjects: Project[]
 ): DeveloperInfo {
-  const target = developerIdentifier.trim();
+  const target = (developerIdentifier || '').trim();
   const targetLower = target.toLowerCase();
 
   // Match by developerName OR ownerId
   const devProjects = allProjects.filter(p => 
-    p.developerName.toLowerCase() === targetLower || 
-    p.ownerId === target ||
-    (targetLower.includes('lord demon') && p.developerName.toUpperCase().includes('LORD DEMON'))
+    (p.developerName && p.developerName.toLowerCase() === targetLower) || 
+    (p.ownerId && p.ownerId === target)
   );
 
-  const isLordDemon = targetLower.includes('lord demon') || target === 'dev_lord_demon';
-  const name = isLordDemon ? 'LORD DEMON' : (devProjects[0]?.developerName || target);
+  const isLordDemon =
+    target === 'dev_lord_demon' ||
+    devProjects.some(
+      (p) =>
+        p.ownerId === 'dev_lord_demon' ||
+        Boolean(p.ownerEmail && ADMIN_EMAILS.has(p.ownerEmail.toLowerCase()))
+    );
+
+  const name = isLordDemon ? 'LORD DEMON' : (devProjects[0]?.developerName || target || 'Développeur');
   const role = isLordDemon ? 'Fondateur & Développeur' : 'Développeur';
 
   const totalDownloads = devProjects.reduce((sum, p) => sum + (p.downloads || 0), 0);
@@ -2658,10 +2770,12 @@ export function getDeveloperInfo(
 
   const fallbackRatingsCount = totalRatingsCount;
 
+  const isCertified = isLordDemon || devProjects.some(p => (p.downloads || 0) >= 50 && (p.views || 0) >= 100);
+
   return {
     id: devProjects[0]?.ownerId || target,
     name,
-    role,
+    role: isLordDemon ? 'Fondateur & Développeur' : (isCertified ? 'Développeur Certifié' : 'Développeur'),
     photoURL: isLordDemon 
       ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=80'
       : (devProjects[0]?.thumbnail || undefined),
@@ -2673,6 +2787,7 @@ export function getDeveloperInfo(
     ratingsCount: fallbackRatingsCount,
     followersCount: isLordDemon ? 142 : Math.max(1, devProjects.length * 3),
     isLordDemon,
+    isCertified,
     projects: devProjects,
   };
 }

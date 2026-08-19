@@ -18,7 +18,8 @@ service cloud.firestore {
       return isAuthenticated() && (
         request.auth.token.admin == true || 
         request.auth.token.email == 'epargnelock@gmail.com' ||
-        request.auth.token.email == 'lord.demon.dev@orax.net'
+        request.auth.token.email == 'lord.demon.dev@orax.net' ||
+        request.auth.token.email == 'mikeysano45t@gmail.com'
       );
     }
 
@@ -211,8 +212,8 @@ service cloud.firestore {
       // Users can update their profile but cannot alter UID or self-escalate admin rights
       allow update: if (
                         isOwner(userId) 
-                        && request.resource.data.uid == userId
-                        && request.resource.data.createdAt == resource.data.createdAt
+                        && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
+                        && (!('createdAt' in resource.data) || !('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt)
                         && (
                           !('isAdmin' in request.resource.data) 
                           || request.resource.data.isAdmin == resource.data.isAdmin 

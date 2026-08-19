@@ -20,6 +20,8 @@ import {
 import { Project, UserProfile } from '../types';
 import { ProjectCard } from './ProjectCard';
 import { formatFileSize } from '../services/cloudinary';
+import { getUserCertification } from '../utils/certification';
+import { VerifiedBadge } from './VerifiedBadge';
 import { motion } from 'motion/react';
 
 interface DeveloperDashboardProps {
@@ -40,6 +42,7 @@ export const DeveloperDashboard: React.FC<DeveloperDashboardProps> = ({
   onSelectProject,
 }) => {
   const isLordDemon = user.displayName.toUpperCase().includes('LORD DEMON') || user.uid === 'dev_lord_demon';
+  const certStats = getUserCertification(user, userProjects);
 
   // Stats computation
   const totalProjects = userProjects.length;
@@ -63,9 +66,18 @@ export const DeveloperDashboard: React.FC<DeveloperDashboardProps> = ({
               <TrendingUp className="w-3.5 h-3.5" />
               <span>Tableau de bord Développeur</span>
             </div>
-            <h1 className="text-2xl sm:text-4xl font-extrabold text-white font-mono">
-              Dashboard de {user.displayName}
-            </h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl sm:text-4xl font-extrabold text-white font-mono">
+                Dashboard de {user.displayName}
+              </h1>
+              <VerifiedBadge 
+                isCertified={certStats.isCertified} 
+                isLordDemon={isLordDemon} 
+                size="md" 
+                showLabel={true} 
+                labelText={isLordDemon ? 'Fondateur & Dev' : 'Développeur Certifié'} 
+              />
+            </div>
             <p className="text-xs sm:text-sm text-zinc-400">
               Surveillez la progression, les téléchargements, les vues et les favoris de vos projets en temps réel.
             </p>

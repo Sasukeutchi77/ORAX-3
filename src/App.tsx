@@ -968,6 +968,7 @@ function MainApp() {
             onOpenPublish={handleOpenPublish}
             onSelectDeveloper={setSelectedDeveloper}
             onUpdateUser={(updated) => setCurrentUser(updated)}
+            onLogout={handleLogout}
           />
         )}
 

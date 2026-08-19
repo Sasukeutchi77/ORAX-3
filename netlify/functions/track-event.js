@@ -205,6 +205,17 @@ export const handler = async (event) => {
       const countField = type === 'view' ? 'views' : 'downloads';
       const currentCount = projectData[countField] || (type === 'view' ? 1 : 0);
 
+      // Anti-fraud: Project author cannot increment views/downloads on their own project
+      if (isVerifiedUser && trackerDocId === `usr_${(projectData.ownerId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`) {
+        return {
+          isNew: false,
+          count: currentCount,
+          projectId,
+          type,
+          authorIgnored: true,
+        };
+      }
+
       // If this visitor/user already logged an entry in the subcollection, do not increment again
       if (trackerDoc.exists()) {
         return {

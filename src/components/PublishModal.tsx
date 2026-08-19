@@ -214,6 +214,18 @@ export const PublishModal: React.FC<PublishModalProps> = ({
         cloudinaryPublicId: uploadResult.publicId,
         thumbnail: thumbnailUrl,
         version: version.trim() || '1.0.0',
+        releases: [
+          {
+            version: version.trim() || '1.0.0',
+            title: 'Version Initiale',
+            changelog: 'Première publication officielle du projet sur ORAX PROJET.',
+            releaseDate: new Date().toISOString(),
+            fileUrl: uploadResult.url,
+            fileName: projectFile.name,
+            fileSize: uploadResult.bytes || projectFile.size,
+            downloads: 0,
+          }
+        ],
         featured: false,
       });
 

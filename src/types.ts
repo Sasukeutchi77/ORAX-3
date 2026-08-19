@@ -11,6 +11,17 @@ export type ProjectCategory =
 
 export type ProjectStatus = 'published' | 'pending' | 'hidden' | 'rejected';
 
+export interface ProjectRelease {
+  version: string;
+  title?: string;
+  changelog: string;
+  releaseDate: string; // ISO date string
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number; // in bytes
+  downloads?: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -42,6 +53,7 @@ export interface Project {
   demoUrl?: string;
   githubUrl?: string;
   version?: string;
+  releases?: ProjectRelease[];
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
   searchKeywords?: string[]; // Normalized lowercase tokens for fast Firestore indexing
@@ -81,6 +93,7 @@ export interface DeveloperInfo {
   ratingsCount: number;
   followersCount: number;
   isLordDemon: boolean;
+  isCertified: boolean;
   projects: Project[];
 }
 
@@ -99,6 +112,7 @@ export interface UserProfile {
   favorites?: string[]; // Array of favorited project IDs
   followersCount?: number;
   isAdmin?: boolean;
+  isCertified?: boolean;
 }
 
 export type SortOption = 'recent' | 'oldest' | 'downloads' | 'popular' | 'rating' | 'alpha';

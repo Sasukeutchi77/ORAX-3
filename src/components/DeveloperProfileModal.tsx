@@ -18,7 +18,10 @@ import {
 } from 'lucide-react';
 import { Project, UserProfile, DeveloperInfo } from '../types';
 import { getDeveloperInfo, toggleFollowDeveloper, isFollowingDeveloper } from '../services/firebase';
+import { getDeveloperCertification } from '../utils/certification';
+import { VerifiedBadge } from './VerifiedBadge';
 import { ProjectCard } from './ProjectCard';
+import { TrophiesDisplay } from './TrophiesDisplay';
 import { useToast } from './Toast';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -50,6 +53,11 @@ export const DeveloperProfileModal: React.FC<DeveloperProfileModalProps> = ({
     if (!developerIdentifier) return null;
     return getDeveloperInfo(developerIdentifier, allProjects);
   }, [developerIdentifier, allProjects]);
+
+  const certStats = useMemo(() => {
+    if (!devInfo) return null;
+    return getDeveloperCertification(devInfo.name, allProjects);
+  }, [devInfo, allProjects]);
 
   const isFollowing = useMemo(() => {
     if (!devInfo) return false;
@@ -191,12 +199,13 @@ export const DeveloperProfileModal: React.FC<DeveloperProfileModalProps> = ({
                     <h1 className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight">
                       {devInfo.name}
                     </h1>
-                    {devInfo.isLordDemon && (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-cyan-950 text-cyan-300 border border-cyan-700/50 flex items-center gap-1">
-                        <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                        Vérifié
-                      </span>
-                    )}
+                    <VerifiedBadge 
+                      isCertified={certStats?.isCertified || devInfo.isLordDemon} 
+                      isLordDemon={devInfo.isLordDemon} 
+                      size="md" 
+                      showLabel={true} 
+                      labelText={devInfo.isLordDemon ? 'Fondateur ORAX' : 'Développeur Certifié'} 
+                    />
                   </div>
 
                   <p className="text-sm font-semibold text-cyan-400 font-mono">
@@ -289,6 +298,78 @@ export const DeveloperProfileModal: React.FC<DeveloperProfileModalProps> = ({
                 <div className="text-[10px] text-zinc-400">consultations</div>
               </div>
 
+            </div>
+
+            {/* Certification Status Banner */}
+            {certStats && (
+              <div className={`mt-5 p-4 rounded-2xl border font-mono flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs ${
+                certStats.isCertified
+                  ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                  : 'bg-zinc-950/80 border-zinc-800 text-zinc-400'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                    certStats.isCertified 
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' 
+                      : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                  }`}>
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-sm text-zinc-100 flex items-center gap-1.5">
+                      <span>Statut :</span>
+                      {certStats.isCertified ? (
+                        <span className="text-emerald-400 flex items-center gap-1">
+                          Compte Développeur Certifié ✓
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400">En cours de certification</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      {certStats.isCertified
+                        ? (certStats.isLordDemon 
+                            ? 'Compte fondateur & développeur officiel certifié ORAX.'
+                            : `Compte vérifié : au moins 50 téléchargements et 100 vues atteints (${certStats.qualifyingProject?.name || 'projet qualifié'}).`)
+                        : `Progression : ${certStats.maxDownloads}/50 dl et ${certStats.maxViews}/100 vues sur son meilleur projet.`}
+                    </p>
+                  </div>
+                </div>
+
+                {!certStats.isCertified && (
+                  <div className="w-full sm:w-48 shrink-0 space-y-1 text-[10px]">
+                    <div className="flex justify-between text-zinc-400">
+                      <span>Téléchargements ({certStats.maxDownloads}/50)</span>
+                      <span>{certStats.downloadsProgress}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-emerald-500 rounded-full transition-all duration-500" 
+                        style={{ width: `${certStats.downloadsProgress}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-zinc-400 pt-1">
+                      <span>Vues ({certStats.maxViews}/100)</span>
+                      <span>{certStats.viewsProgress}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-cyan-500 rounded-full transition-all duration-500" 
+                        style={{ width: `${certStats.viewsProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Gamification & Developer Trophies Preview */}
+            <div className="mt-5">
+              <TrophiesDisplay 
+                developerName={devInfo.name} 
+                userProjects={devInfo.projects} 
+                compact={true} 
+              />
             </div>
           </div>
 

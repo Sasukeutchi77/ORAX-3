@@ -17,6 +17,7 @@ import { Project, UserProfile } from '../types';
 import { getCategoryById } from '../data/categories';
 import { formatFileSize } from '../services/cloudinary';
 import { isProjectFavorited } from '../services/firebase';
+import { VerifiedBadge } from './VerifiedBadge';
 import { motion } from 'motion/react';
 
 interface ProjectCardProps {
@@ -48,6 +49,7 @@ const ProjectCardComponent: React.FC<ProjectCardProps> = ({
   const ratingValue = hasRating ? project.rating!.toFixed(1) : '0.0';
 
   const isFavorited = isProjectFavorited(project.id, currentUser);
+  const isCertified = isLordDemon || ((project.downloads || 0) >= 50 && (project.views || 0) >= 100);
 
   const formatDate = (isoString: string) => {
     try {
@@ -195,6 +197,7 @@ const ProjectCardComponent: React.FC<ProjectCardProps> = ({
               >
                 <User className={`w-3.5 h-3.5 shrink-0 ${isLordDemon ? 'text-cyan-400' : 'text-zinc-400'}`} />
                 <span className="truncate">{project.developerName}</span>
+                <VerifiedBadge isCertified={isCertified} isLordDemon={isLordDemon} size="xs" />
                 {isLordDemon && (
                   <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-extrabold bg-cyan-500/30 text-cyan-300 border border-cyan-400/50 shadow-inner">
                     Fondateur

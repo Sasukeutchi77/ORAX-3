@@ -194,11 +194,44 @@ export const EditProjectModal: React.FC<EditProjectModalProps> = ({
         updatedDesc = `${description.trim()}\n\n### 🚀 Nouveautés (v${newVersionNumber})\n${versionNotes.trim()}`;
       }
 
+      // Construct releases history
+      const currentReleaseObj = {
+        version: project.version || '1.0.0',
+        title: `Version ${project.version || '1.0.0'}`,
+        changelog: 'Mise à jour précédente',
+        releaseDate: project.updatedAt || project.createdAt,
+        fileUrl: project.fileUrl,
+        fileName: project.fileName,
+        fileSize: project.fileSize,
+        downloads: project.downloads || 0,
+      };
+
+      const newReleaseObj = {
+        version: newVersionNumber.trim(),
+        title: versionNotes.trim().split('\n')[0] || `Version ${newVersionNumber.trim()}`,
+        changelog: versionNotes.trim() || 'Mise à jour et améliorations de performances.',
+        releaseDate: new Date().toISOString(),
+        fileUrl,
+        fileName,
+        fileSize,
+        downloads: 0,
+      };
+
+      const previousReleases = project.releases && project.releases.length > 0 
+        ? project.releases 
+        : [currentReleaseObj];
+
+      const updatedReleases = [
+        newReleaseObj,
+        ...previousReleases.filter(r => r.version !== newVersionNumber.trim())
+      ];
+
       const updated = await updateExistingProject(project.id, {
         name: name.trim(),
         shortDescription: shortDescription.trim(),
         description: updatedDesc,
         version: newVersionNumber.trim(),
+        releases: updatedReleases,
         fileUrl,
         fileName,
         fileSize,
