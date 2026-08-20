@@ -696,7 +696,7 @@ export function subscribeToProjects(
   callback: (projects: Project[]) => void,
   options: SubscribeProjectsOptions = {}
 ): () => void {
-  const maxLimit = options.limitCount || 100;
+  const maxLimit = options.limitCount || 200;
 
   if (!db || !isFirebaseConfigured()) {
     updateSyncStatus('offline');
@@ -706,38 +706,83 @@ export function subscribeToProjects(
 
   let unsubscribeFirestore: (() => void) | null = null;
 
+  const processSnapshot = (docs: any[]) => {
+    const fetched = docs.map((d) => ({ id: d.id, ...d.data() } as Project));
+    const visible = options.isAdmin
+      ? fetched
+      : fetched.filter(p => !p.status || p.status === 'published' || (options.userId && p.ownerId === options.userId));
+    const realOnly = deduplicateProjects(visible);
+    updateSyncStatus('synced');
+    callback(realOnly);
+  };
+
   try {
     updateSyncStatus(navigator.onLine ? 'connecting' : 'offline');
 
-    const q = options.isAdmin
-      ? query(collection(db, 'projects'), orderBy('createdAt', 'desc'), limit(maxLimit))
-      : query(
-          collection(db, 'projects'),
-          where('status', '==', 'published'),
-          orderBy('createdAt', 'desc'),
-          limit(maxLimit)
-        );
+    // Query projects with single-field orderBy (supported natively without composite index requirements)
+    const q = query(
+      collection(db, 'projects'),
+      orderBy('createdAt', 'desc'),
+      limit(maxLimit)
+    );
 
     unsubscribeFirestore = onSnapshot(
       q,
       (snapshot) => {
         if (snapshot) {
-          const fetched = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Project));
-          const realOnly = deduplicateProjects(fetched);
-          updateSyncStatus('synced');
-          callback(realOnly);
+          processSnapshot(snapshot.docs);
         }
       },
       (err) => {
-        console.warn('Firestore real-time snapshot notice:', err);
-        updateSyncStatus(navigator.onLine ? 'error' : 'offline');
-        callback([]);
+        console.warn('Primary onSnapshot notice, activating resilient collection fallback:', err);
+        try {
+          const fallbackQ = query(collection(db, 'projects'), limit(maxLimit));
+          unsubscribeFirestore = onSnapshot(
+            fallbackQ,
+            (fallbackSnapshot) => {
+              if (fallbackSnapshot) {
+                const docs = [...fallbackSnapshot.docs];
+                docs.sort((a, b) => {
+                  const timeA = new Date(a.data()?.createdAt || 0).getTime();
+                  const timeB = new Date(b.data()?.createdAt || 0).getTime();
+                  return timeB - timeA;
+                });
+                processSnapshot(docs);
+              }
+            },
+            (fallbackErr) => {
+              console.error('Firestore fallback snapshot error:', fallbackErr);
+              updateSyncStatus(navigator.onLine ? 'error' : 'offline');
+              callback([]);
+            }
+          );
+        } catch (fbInitErr) {
+          console.error('Firestore fallback init error:', fbInitErr);
+          updateSyncStatus(navigator.onLine ? 'error' : 'offline');
+          callback([]);
+        }
       }
     );
   } catch (err) {
-    console.warn('Firestore onSnapshot init error:', err);
-    updateSyncStatus(navigator.onLine ? 'error' : 'offline');
-    callback([]);
+    console.warn('Firestore onSnapshot init error, fallbacking:', err);
+    try {
+      const fallbackQ = query(collection(db, 'projects'), limit(maxLimit));
+      unsubscribeFirestore = onSnapshot(
+        fallbackQ,
+        (fallbackSnapshot) => {
+          if (fallbackSnapshot) {
+            processSnapshot(fallbackSnapshot.docs);
+          }
+        },
+        () => {
+          updateSyncStatus(navigator.onLine ? 'error' : 'offline');
+          callback([]);
+        }
+      );
+    } catch {
+      updateSyncStatus(navigator.onLine ? 'error' : 'offline');
+      callback([]);
+    }
   }
 
   return () => {
@@ -753,22 +798,39 @@ export async function getProjects(options: SubscribeProjectsOptions = {}): Promi
     return [];
   }
 
+  const maxLimit = options.limitCount || 200;
+
+  const processDocs = (docs: any[]): Project[] => {
+    const fetched = docs.map(d => ({ id: d.id, ...d.data() } as Project));
+    const visible = options.isAdmin
+      ? fetched
+      : fetched.filter(p => !p.status || p.status === 'published' || (options.userId && p.ownerId === options.userId));
+    const realOnly = deduplicateProjects(visible);
+    updateSyncStatus('synced');
+    return realOnly;
+  };
+
   try {
     updateSyncStatus('syncing');
-    const constraints: any[] = [];
-    if (!options.isAdmin) {
-      constraints.push(where('status', '==', 'published'));
-    }
-    constraints.push(orderBy('createdAt', 'desc'));
-    constraints.push(limit(options.limitCount || 100));
-
-    const q = query(collection(db, 'projects'), ...constraints);
-    const snapshot = await getDocs(q);
-    if (snapshot) {
-      const fetched = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Project));
-      const realOnly = deduplicateProjects(fetched);
-      updateSyncStatus('synced');
-      return realOnly;
+    try {
+      const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'), limit(maxLimit));
+      const snapshot = await getDocs(q);
+      if (snapshot) {
+        return processDocs(snapshot.docs);
+      }
+    } catch (primaryErr) {
+      console.warn('Primary getProjects query notice, using fallback:', primaryErr);
+      const fallbackQ = query(collection(db, 'projects'), limit(maxLimit));
+      const snapshot = await getDocs(fallbackQ);
+      if (snapshot) {
+        const docs = [...snapshot.docs];
+        docs.sort((a, b) => {
+          const timeA = new Date(a.data()?.createdAt || 0).getTime();
+          const timeB = new Date(b.data()?.createdAt || 0).getTime();
+          return timeB - timeA;
+        });
+        return processDocs(docs);
+      }
     }
   } catch (err) {
     updateSyncStatus(navigator.onLine ? 'error' : 'offline');
@@ -1937,13 +1999,29 @@ export async function toggleFavoriteProject(
 export async function getUserProjects(userId: string): Promise<Project[]> {
   if (!db || !isFirebaseConfigured() || !userId) return [];
   try {
-    const q = query(
-      collection(db, 'projects'),
-      where('ownerId', '==', userId),
-      orderBy('createdAt', 'desc')
-    );
-    const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
+    try {
+      const q = query(
+        collection(db, 'projects'),
+        where('ownerId', '==', userId),
+        orderBy('createdAt', 'desc')
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
+    } catch (indexErr) {
+      console.warn('getUserProjects compound query notice, using resilient fallback:', indexErr);
+      const fallbackQ = query(
+        collection(db, 'projects'),
+        where('ownerId', '==', userId)
+      );
+      const snap = await getDocs(fallbackQ);
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
+      docs.sort((a, b) => {
+        const timeA = new Date(a.createdAt || 0).getTime();
+        const timeB = new Date(b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+      return docs;
+    }
   } catch (err) {
     console.warn('getUserProjects error:', err);
     return [];

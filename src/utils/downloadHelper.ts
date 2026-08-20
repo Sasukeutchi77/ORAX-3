@@ -15,30 +15,42 @@ export async function triggerProjectDownload(project: Project): Promise<void> {
   if (project.fileUrl && (project.fileUrl.startsWith('http://') || project.fileUrl.startsWith('https://'))) {
     let targetUrl = project.fileUrl;
 
-    // For Cloudinary image or raw attachments, format attachment header if needed
-    if (targetUrl.includes('cloudinary.com') && targetUrl.includes('/image/upload/') && !targetUrl.includes('fl_attachment')) {
-      targetUrl = targetUrl.replace('/image/upload/', `/image/upload/fl_attachment:${encodeURIComponent(cleanFileName)}/`);
+    // For Cloudinary uploads (raw files, archives, images, binaries), inject fl_attachment header
+    if (targetUrl.includes('cloudinary.com')) {
+      if (targetUrl.includes('/raw/upload/') && !targetUrl.includes('fl_attachment')) {
+        targetUrl = targetUrl.replace('/raw/upload/', `/raw/upload/fl_attachment:${encodeURIComponent(cleanFileName)}/`);
+      } else if (targetUrl.includes('/image/upload/') && !targetUrl.includes('fl_attachment')) {
+        targetUrl = targetUrl.replace('/image/upload/', `/image/upload/fl_attachment:${encodeURIComponent(cleanFileName)}/`);
+      } else if (targetUrl.includes('/video/upload/') && !targetUrl.includes('fl_attachment')) {
+        targetUrl = targetUrl.replace('/video/upload/', `/video/upload/fl_attachment:${encodeURIComponent(cleanFileName)}/`);
+      }
     }
 
-    // Try direct blob fetch for exact filename preservation, with automatic fallback
+    // Attempt 1: Fetch as direct binary blob to guarantee instant download with exact filename
     try {
       const response = await fetch(targetUrl, { mode: 'cors' });
       if (response.ok) {
         const blob = await response.blob();
-        downloadBlobDirectly(blob, cleanFileName);
-        return;
+        if (blob && blob.size > 0) {
+          downloadBlobDirectly(blob, cleanFileName);
+          return;
+        }
       }
     } catch {
-      // CORS or network policy restricted direct blob fetch - use anchor / direct trigger
+      // CORS or network policy restricted direct blob fetch - continue to direct triggers
     }
 
-    // Trigger native browser download via anchor injection & iframe fallback
-    triggerDirectUrlDownload(targetUrl, cleanFileName);
-    return;
+    // Attempt 2: Direct browser download trigger via anchor + iframe
+    try {
+      triggerDirectUrlDownload(targetUrl, cleanFileName);
+      return;
+    } catch {
+      // If direct trigger fails, proceed to generate client package
+    }
   }
 
   // -------------------------------------------------------------------------
-  // 4. Generate structured fallback ZIP archive with JSZip
+  // 2. Generate structured ZIP archive with JSZip (Fallback / Offline / Source code)
   // -------------------------------------------------------------------------
   const zip = new JSZip();
 

@@ -49,6 +49,7 @@ export interface Project {
   ratingsCount?: number; // total number of ratings
   ratings?: Record<string, number>; // userId -> rating value (1 to 5)
   featured?: boolean;
+  verified?: boolean;
   status?: ProjectStatus;
   demoUrl?: string;
   githubUrl?: string;

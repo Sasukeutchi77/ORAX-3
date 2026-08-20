@@ -388,3 +388,21 @@ export async function uploadAvatarToCloudinary(
   });
   return result.url;
 }
+
+/**
+ * Transforms any raw Cloudinary or storage URL into a direct-download link with attachment headers
+ */
+export function getUniversalDownloadUrl(url: string, filename?: string): string {
+  if (!url) return '';
+  let targetUrl = url.trim();
+
+  if (targetUrl.includes('res.cloudinary.com')) {
+    if (!targetUrl.includes('fl_attachment')) {
+      if (targetUrl.includes('/upload/')) {
+        targetUrl = targetUrl.replace('/upload/', '/upload/fl_attachment/');
+      }
+    }
+  }
+  return targetUrl;
+}
+

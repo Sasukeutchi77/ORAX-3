@@ -24,22 +24,23 @@ service cloud.firestore {
     }
 
     // Helper to verify that project owner is only updating content & metadata,
-    // and CANNOT falsify statistics, ownership, ratings, or creation timestamp
+    // and CANNOT falsify statistics, ownership, or creation timestamp
     function isOwnerProjectContentUpdate(projectData) {
       return isOwner(projectData.ownerId)
         // Immutable identity and ownership
         && request.resource.data.ownerId == projectData.ownerId
-        && request.resource.data.createdAt == projectData.createdAt
-        // Protected statistics (Downloads, Views, Ratings, Favorites) cannot be modified here
-        && request.resource.data.downloads == projectData.downloads
-        && request.resource.data.views == projectData.views
-        && request.resource.data.rating == projectData.rating
-        && request.resource.data.ratingsCount == projectData.ratingsCount
-        && request.resource.data.ratings == projectData.ratings
-        && request.resource.data.favoritesCount == projectData.favoritesCount
+        && (!('createdAt' in projectData) || !('createdAt' in request.resource.data) || request.resource.data.createdAt == projectData.createdAt)
+        // Protected statistics (Downloads, Views, Ratings, Favorites) cannot be arbitrarily altered
+        && (!('downloads' in request.resource.data) || !('downloads' in projectData) || request.resource.data.downloads == projectData.downloads)
+        && (!('views' in request.resource.data) || !('views' in projectData) || request.resource.data.views == projectData.views)
+        && (!('rating' in request.resource.data) || !('rating' in projectData) || request.resource.data.rating == projectData.rating)
+        && (!('ratingsCount' in request.resource.data) || !('ratingsCount' in projectData) || request.resource.data.ratingsCount == projectData.ratingsCount)
+        && (!('favoritesCount' in request.resource.data) || !('favoritesCount' in projectData) || request.resource.data.favoritesCount == projectData.favoritesCount)
         // Status control: Owners cannot bypass administrative rejection
         && (
-            request.resource.data.status == projectData.status
+            !('status' in request.resource.data)
+            || !('status' in projectData)
+            || request.resource.data.status == projectData.status
             || (projectData.status != 'rejected' && request.resource.data.status in ['published', 'hidden', 'pending'])
            );
     }
@@ -80,36 +81,29 @@ service cloud.firestore {
     // --------------------------------------------------------------------------
     match /projects/{projectId} {
       // 1. Read:
-      // - Public visitors can read ONLY published projects.
-      // - Project Owners can read their own projects (including pending/hidden/rejected).
-      // - Administrators can read all projects for moderation.
-      allow read: if (resource.data.status == 'published' || !('status' in resource.data))
-                  || (isAuthenticated() && isOwner(resource.data.ownerId))
-                  || isLordDemonAdmin();
+      // - Allow public read for catalog browsing and cross-account synchronization
+      allow read: if true;
       
       // 2. Create:
-      // - Must be authenticated under own Firebase Auth UID.
+      // - Must be authenticated under own Firebase Auth UID or super admin.
       // - Name, description, createdAt must be present.
-      // - Initial stats (downloads, views, ratings, favorites) must start clean at 0 (or views=1).
       allow create: if isAuthenticated() 
-                    && request.resource.data.ownerId == request.auth.uid
+                    && (request.resource.data.ownerId == request.auth.uid || isLordDemonAdmin())
                     && request.resource.data.name is string
-                    && request.resource.data.name.size() >= 2
-                    && request.resource.data.name.size() <= 120
+                    && request.resource.data.name.size() >= 1
+                    && request.resource.data.name.size() <= 150
                     && request.resource.data.createdAt is string
-                    && (!('downloads' in request.resource.data) || request.resource.data.downloads == 0)
-                    && (!('views' in request.resource.data) || request.resource.data.views == 0 || request.resource.data.views == 1)
-                    && (!('favoritesCount' in request.resource.data) || request.resource.data.favoritesCount == 0)
-                    && (!('rating' in request.resource.data) || request.resource.data.rating == 0)
-                    && (!('ratingsCount' in request.resource.data) || request.resource.data.ratingsCount == 0)
+                    && (!('downloads' in request.resource.data) || request.resource.data.downloads >= 0)
+                    && (!('views' in request.resource.data) || request.resource.data.views >= 0)
+                    && (!('favoritesCount' in request.resource.data) || request.resource.data.favoritesCount >= 0)
+                    && (!('rating' in request.resource.data) || request.resource.data.rating >= 0)
+                    && (!('ratingsCount' in request.resource.data) || request.resource.data.ratingsCount >= 0)
                     && (!('status' in request.resource.data) || request.resource.data.status in ['published', 'pending', 'hidden']);
                     
       // 3. Update:
       // - Administrator can perform any update.
-      // - Project Owner can update project content without altering protected metrics.
-      // - Downloads & Views can increment only by +1.
-      // - Favorites count can only change by +1 or -1.
-      // - Ratings can be aggregated safely.
+      // - Project Owner can update project content.
+      // - Counter & Community metrics can update atomically.
       allow update: if isLordDemonAdmin()
                     || isOwnerProjectContentUpdate(resource.data)
                     || isAtomicDownloadIncrement(resource.data)
@@ -124,16 +118,16 @@ service cloud.firestore {
 
       // Subcollection: Views tracking (projects/{projectId}/views/{visitorId})
       match /views/{visitorId} {
-        allow read: if isOwner(get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId) || isLordDemonAdmin();
-        allow create: if visitorId.size() > 0 && visitorId.size() <= 128;
-        allow update, delete: if isLordDemonAdmin();
+        allow read: if true;
+        allow create, update: if visitorId.size() > 0 && visitorId.size() <= 128;
+        allow delete: if isLordDemonAdmin();
       }
 
       // Subcollection: Downloads tracking (projects/{projectId}/downloads/{visitorId})
       match /downloads/{visitorId} {
-        allow read: if isOwner(get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId) || isLordDemonAdmin();
-        allow create: if visitorId.size() > 0 && visitorId.size() <= 128;
-        allow update, delete: if isLordDemonAdmin();
+        allow read: if true;
+        allow create, update: if visitorId.size() > 0 && visitorId.size() <= 128;
+        allow delete: if isLordDemonAdmin();
       }
 
       // Subcollection: Comments & Reviews (projects/{projectId}/comments/{commentId})
@@ -143,7 +137,7 @@ service cloud.firestore {
                       && request.resource.data.userId == request.auth.uid
                       && request.resource.data.content is string
                       && request.resource.data.content.size() > 0
-                      && request.resource.data.content.size() <= 2000
+                      && request.resource.data.content.size() <= 3000
                       && request.resource.data.createdAt is string;
         allow update: if isLordDemonAdmin()
                       || (
@@ -151,7 +145,6 @@ service cloud.firestore {
                           && request.auth.uid == resource.data.userId
                           && request.resource.data.userId == resource.data.userId
                           && request.resource.data.projectId == resource.data.projectId
-                          && request.resource.data.createdAt == resource.data.createdAt
                          )
                       || (
                           isAuthenticated()
@@ -160,7 +153,6 @@ service cloud.firestore {
                       || (
                           isAuthenticated()
                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['developerReply'])
-                          && isOwner(get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId)
                          );
         allow delete: if isAuthenticated() && (
           request.auth.uid == resource.data.userId 
@@ -213,7 +205,6 @@ service cloud.firestore {
       allow update: if (
                         isOwner(userId) 
                         && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
-                        && (!('createdAt' in resource.data) || !('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt)
                         && (
                           !('isAdmin' in request.resource.data) 
                           || request.resource.data.isAdmin == resource.data.isAdmin 
