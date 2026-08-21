@@ -45,21 +45,21 @@ export const GithubBadgeModal: React.FC<GithubBadgeModalProps> = ({ project, onC
       case 'downloads': {
         const count = project.downloads || 0;
         const formatted = count >= 1000 ? `${(count / 1000).toFixed(1)}k` : `${count}`;
-        return `https://img.shields.io/badge/ORAX_PROJET-${formatted}_téléchargements-06b6d4?style=${style}&logo=rocket&logoColor=white`;
+        return `https://img.shields.io/badge/NEXORA-${formatted}_téléchargements-06b6d4?style=${style}&logo=rocket&logoColor=white`;
       }
       case 'rating': {
         const rating = project.rating && project.rating > 0 ? project.rating.toFixed(1) : '5.0';
-        return `https://img.shields.io/badge/ORAX_Note-${rating}_★-eab308?style=${style}&logo=star&logoColor=white`;
+        return `https://img.shields.io/badge/NEXORA_Note-${rating}_★-eab308?style=${style}&logo=star&logoColor=white`;
       }
       case 'version': {
         const ver = project.version || 'v1.0.0';
-        return `https://img.shields.io/badge/ORAX_Release-${encodeURIComponent(ver)}-10b981?style=${style}&logo=tag&logoColor=white`;
+        return `https://img.shields.io/badge/NEXORA_Release-${encodeURIComponent(ver)}-10b981?style=${style}&logo=tag&logoColor=white`;
       }
       case 'certified': {
-        return `https://img.shields.io/badge/ORAX-Projet_Vérifié-3b82f6?style=${style}&logo=shield&logoColor=white`;
+        return `https://img.shields.io/badge/NEXORA-Projet_Vérifié-3b82f6?style=${style}&logo=shield&logoColor=white`;
       }
       case 'platform': {
-        return `https://img.shields.io/badge/Disponible_sur-ORAX_PROJET-09090b?style=${style}&labelColor=06b6d4&color=18181b`;
+        return `https://img.shields.io/badge/Disponible_sur-NEXORA-09090b?style=${style}&labelColor=06b6d4&color=18181b`;
       }
     }
   };
@@ -70,9 +70,9 @@ export const GithubBadgeModal: React.FC<GithubBadgeModalProps> = ({ project, onC
   const getCodeSnippet = () => {
     switch (exportFormat) {
       case 'markdown':
-        return `[![ORAX PROJET - ${project.name}](${currentBadgeImageUrl})](${projectLink})`;
+        return `[![NEXORA - ${project.name}](${currentBadgeImageUrl})](${projectLink})`;
       case 'html':
-        return `<a href="${projectLink}" target="_blank" rel="noopener noreferrer"><img src="${currentBadgeImageUrl}" alt="ORAX - ${project.name}" /></a>`;
+        return `<a href="${projectLink}" target="_blank" rel="noopener noreferrer"><img src="${currentBadgeImageUrl}" alt="NEXORA - ${project.name}" /></a>`;
       case 'url':
         return currentBadgeImageUrl;
     }
@@ -107,11 +107,11 @@ export const GithubBadgeModal: React.FC<GithubBadgeModalProps> = ({ project, onC
               <div className="flex items-center gap-2">
                 <h3 className="text-xl font-extrabold text-white font-mono">Générateur de Badges GitHub</h3>
                 <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 text-[10px] font-mono font-bold">
-                  ORAX Badges
+                  NEXORA Badges
                 </span>
               </div>
               <p className="text-xs text-zinc-400">
-                Affichez en direct vos statistiques et votre téléchargement ORAX dans le README de votre projet.
+                Affichez en direct vos statistiques et votre téléchargement NEXORA dans le README de votre projet.
               </p>
             </div>
           </div>
@@ -138,7 +138,7 @@ export const GithubBadgeModal: React.FC<GithubBadgeModalProps> = ({ project, onC
               className="max-h-10 transition-transform duration-200 hover:scale-105"
             />
             <p className="text-[11px] text-zinc-500 font-mono">
-              Clique sur le badge pour ouvrir la page du projet ORAX
+              Clique sur le badge pour ouvrir la page du projet NEXORA
             </p>
           </div>
         </div>
@@ -154,8 +154,8 @@ export const GithubBadgeModal: React.FC<GithubBadgeModalProps> = ({ project, onC
                 { id: 'downloads', label: '🚀 Téléchargements cumulés', sub: `${project.downloads || 0} téléchargements` },
                 { id: 'rating', label: '⭐ Note et Avis communautaires', sub: `${project.rating || 5.0} ★` },
                 { id: 'version', label: '🏷️ Version / Release actuelle', sub: project.version || 'v1.0.0' },
-                { id: 'certified', label: '🛡️ Badge Projet Vérifié ORAX', sub: 'Certifié et sécurisé' },
-                { id: 'platform', label: '🌐 Bouton Disponible sur ORAX', sub: 'Lien plateforme' },
+                { id: 'certified', label: '🛡️ Badge Projet Vérifié NEXORA', sub: 'Certifié et sécurisé' },
+                { id: 'platform', label: '🌐 Bouton Disponible sur NEXORA', sub: 'Lien plateforme' },
               ].map((item) => (
                 <button
                   key={item.id}

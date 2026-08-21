@@ -35,7 +35,7 @@ export const VerifiedBadge: React.FC<VerifiedBadgeProps> = ({
   };
 
   const titleText = isLordDemon
-    ? 'Fondateur & Développeur Certifié ORAX'
+    ? 'Fondateur & Développeur Certifié NEXORA'
     : 'Développeur Certifié (+50 téléchargements et +100 vues sur un projet)';
 
   if (isLordDemon) {

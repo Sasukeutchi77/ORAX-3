@@ -9,7 +9,7 @@ export interface DownloadResult {
 }
 
 /**
- * Universal & Resilient Download Engine for ORAX PROJET
+ * Universal & Resilient Download Engine for NEXORA
  * Guarantees that a valid, unblocked file is immediately saved to the user's Downloads folder
  * across Android, iOS, Windows, macOS, and Linux without ever redirecting to dead 401 error pages.
  */
@@ -71,20 +71,20 @@ export async function triggerProjectDownload(project: Project): Promise<Download
 
   // A. README.md with detailed documentation
   const readmeContent = `# ${project.name} (v${project.version || '1.0.0'})
-**Développeur :** ${project.developerName || 'ORAX PROJET'}
+**Développeur :** ${project.developerName || 'NEXORA'}
 **Catégorie :** ${project.category}
 **Date de téléchargement :** ${new Date().toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
 
 ---
 
 ## 📌 Description du Projet
-${project.description || project.shortDescription || 'Projet publié sur la plateforme ORAX PROJET.'}
+${project.description || project.shortDescription || 'Projet publié sur la plateforme NEXORA.'}
 
 ## 💻 Technologies & Dépendances
 ${(project.technologies || ['JavaScript', 'Node.js']).map((t) => `- **${t}**`).join('\n')}
 
 ## 🏷️ Tags
-${(project.tags || ['orax', 'projet']).map((t) => `#${t}`).join(' ')}
+${(project.tags || ['nexora', 'projet']).map((t) => `#${t}`).join(' ')}
 
 ---
 
@@ -109,15 +109,15 @@ node src/main.js
 \`\`\`
 
 ---
-*Projet certifié et transmis de manière sécurisée via ORAX PROJET.*
+*Projet certifié et transmis de manière sécurisée via NEXORA.*
 *Fondateur : LORD DEMON*
 `;
 
   zip.file('README.md', readmeContent);
 
-  // B. Manifest ORAX PROJET
+  // B. Manifest NEXORA
   zip.file(
-    'orax-manifest.json',
+    'nexora-manifest.json',
     JSON.stringify(
       {
         id: project.id,
@@ -151,7 +151,7 @@ node src/main.js
   // D. LICENSE
   zip.file(
     'LICENSE',
-    `MIT License\n\nCopyright (c) ${new Date().getFullYear()} ${project.developerName || 'ORAX PROJET'}\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software...`
+    `MIT License\n\nCopyright (c) ${new Date().getFullYear()} ${project.developerName || 'NEXORA'}\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software...`
   );
 
   // E. Source code directory according to category

@@ -182,7 +182,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-zinc-400">
-                Surveillance de la plateforme, modération des projets et contrôle des contenus ORAX.
+                Surveillance de la plateforme, modération des projets et contrôle des contenus NEXORA.
               </p>
             </div>
           </div>

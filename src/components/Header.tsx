@@ -84,7 +84,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold tracking-tight text-lg sm:text-xl text-white font-mono">
-                  ORAX<span className="text-cyan-400">PROJET</span>
+                  NEX<span className="text-cyan-400">ORA</span>
                 </span>
                 
                 {/* Sync & Connectivity State Pill */}

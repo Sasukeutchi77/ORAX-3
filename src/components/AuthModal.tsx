@@ -171,7 +171,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           avatarUrl || undefined
         );
         showToast({
-          title: 'Bienvenue sur ORAX PROJET !',
+          title: 'Bienvenue sur NEXORA !',
           message: `Compte créé avec succès pour ${user.displayName}.`,
           type: 'success',
         });
@@ -236,7 +236,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 Bienvenue, {newlyRegisteredUser.displayName} !
               </h2>
               <p className="text-xs text-zinc-300 max-w-md mx-auto leading-relaxed">
-                Avant de commencer à utiliser <strong className="text-cyan-400 font-semibold">ORAX PROJET</strong>, rejoignez nos canaux officiels pour suivre les mises à jour, découvrir de nouveaux scripts et échanger avec la communauté de développeurs !
+                Avant de commencer à utiliser <strong className="text-cyan-400 font-semibold">NEXORA</strong>, rejoignez nos canaux officiels pour suivre les mises à jour, découvrir de nouveaux scripts et échanger avec la communauté de développeurs !
               </p>
             </div>
 
@@ -368,7 +368,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 onClick={handleFinishOnboarding}
                 className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold text-sm bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-zinc-950 shadow-xl shadow-cyan-500/25 transition-all transform active:scale-95 cursor-pointer"
               >
-                <span>Accéder à ORAX PROJET</span>
+                <span>Accéder à NEXORA</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -381,13 +381,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <KeyRound className="w-6 h-6" />
               </div>
               <h2 className="text-2xl font-bold text-white font-mono">
-                {mode === 'login' && 'Connexion à ORAX'}
+                {mode === 'login' && 'Connexion à NEXORA'}
                 {mode === 'register' && 'Créer un compte Dev'}
                 {mode === 'forgot' && 'Mot de passe oublié'}
               </h2>
               <p className="text-xs text-zinc-400 mt-1">
                 {mode === 'login' && 'Accédez à vos projets et publiez vos créations'}
-                {mode === 'register' && 'Rejoignez la communauté des développeurs ORAX PROJET'}
+                {mode === 'register' && 'Rejoignez la communauté des développeurs NEXORA'}
                 {mode === 'forgot' && 'Entrez votre e-mail pour recevoir le lien de réinitialisation'}
               </p>
             </div>

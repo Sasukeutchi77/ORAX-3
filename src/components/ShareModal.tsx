@@ -31,8 +31,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({ project, onClose, isOpen
 
   const baseUrl = window.location.origin;
   const projectLink = `${baseUrl}?project=${encodeURIComponent(project.slug || project.id)}`;
-  const shareTitle = `Découvrez "${project.name}" sur ORAX PROJET`;
-  const shareText = `Téléchargez et testez "${project.name}" par ${project.developerName} sur la plateforme de projets ORAX PROJET ! 🚀`;
+  const shareTitle = `Découvrez "${project.name}" sur NEXORA`;
+  const shareText = `Téléchargez et testez "${project.name}" par ${project.developerName} sur la plateforme de projets NEXORA ! 🚀`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(projectLink);
@@ -68,7 +68,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ project, onClose, isOpen
       icon: '𝕏',
       color: 'bg-black hover:bg-zinc-800 text-white border-zinc-700',
       action: () => {
-        const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(projectLink)}&hashtags=ORAX,OpenSource,Dev`;
+        const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(projectLink)}&hashtags=NEXORA,OpenSource,Dev`;
         window.open(url, '_blank', 'width=600,height=450');
       },
     },
@@ -95,7 +95,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ project, onClose, isOpen
       icon: '👾',
       color: 'bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border-indigo-500/30',
       action: () => {
-        const discordMarkdown = `**${project.name}** par *${project.developerName}*\n> ${project.shortDescription || project.description}\n📥 **Téléchargement ORAX :** <${projectLink}>`;
+        const discordMarkdown = `**${project.name}** par *${project.developerName}*\n> ${project.shortDescription || project.description}\n📥 **Téléchargement NEXORA :** <${projectLink}>`;
         navigator.clipboard.writeText(discordMarkdown);
         showToast({
           title: 'Format Discord copié !',

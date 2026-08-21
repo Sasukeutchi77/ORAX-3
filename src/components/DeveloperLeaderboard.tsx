@@ -73,7 +73,7 @@ export const DeveloperLeaderboard: React.FC<DeveloperLeaderboardProps> = ({
           Classement des Développeurs
         </h1>
         <p className="text-sm text-zinc-400">
-          Découvrez les créateurs les plus populaires de l'écosystème ORAX classés par nombre de téléchargements et contributions.
+          Découvrez les créateurs les plus populaires de l'écosystème NEXORA classés par nombre de téléchargements et contributions.
         </p>
       </div>
 

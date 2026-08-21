@@ -294,7 +294,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               />
 
               {isLordDemon && (
-                <div className="absolute -bottom-2 -right-2 p-1.5 rounded-lg bg-cyan-500 text-zinc-950 shadow-lg" title="Fondateur ORAX">
+                <div className="absolute -bottom-2 -right-2 p-1.5 rounded-lg bg-cyan-500 text-zinc-950 shadow-lg" title="Fondateur NEXORA">
                   <Sparkles className="w-4 h-4" />
                 </div>
               )}
@@ -366,7 +366,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 id="btn-profile-logout"
                 onClick={onLogout}
                 className="flex items-center gap-2 px-4 py-3 rounded-xl font-bold text-xs sm:text-sm bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:border-rose-500/50 transition-all transform active:scale-95 shrink-0"
-                title="Se déconnecter de votre compte ORAX"
+                title="Se déconnecter de votre compte NEXORA"
               >
                 <LogOut className="w-4 h-4 text-rose-400" />
                 <span>Se déconnecter</span>
@@ -516,7 +516,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-base font-bold text-white">
-                    Badge Développeur Certifié ORAX
+                    Badge Développeur Certifié NEXORA
                   </h3>
                   {certStats.isCertified ? (
                     <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
@@ -533,9 +533,9 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 <p className="text-xs text-zinc-300 max-w-2xl leading-relaxed">
                   {certStats.isCertified ? (
                     certStats.isLordDemon ? (
-                      'Votre compte est le compte officiel du Fondateur et Développeur ORAX. Vous bénéficiez de tous les privilèges et badges certifiés.'
+                      'Votre compte est le compte officiel du Fondateur et Développeur NEXORA. Vous bénéficiez de tous les privilèges et badges certifiés.'
                     ) : (
-                      `Félicitations ! Vous avez dépassé le seuil de 50 téléchargements et 100 vues sur un projet (${certStats.qualifyingProject?.name || 'projet qualifié'}). Votre compte est automatiquement certifié et reconnu comme vrai développeur sur l'ensemble de la plateforme ORAX.`
+                      `Félicitations ! Vous avez dépassé le seuil de 50 téléchargements et 100 vues sur un projet (${certStats.qualifyingProject?.name || 'projet qualifié'}). Votre compte est automatiquement certifié et reconnu comme vrai développeur sur l'ensemble de la plateforme NEXORA.`
                     )
                   ) : (
                     'Règle de certification : pour qu\'un compte soit certifié, il doit avoir au moins 50 téléchargements et 100 vues sur n\'importe lequel de ses projets. Dès ce palier franchi, le compte est automatiquement certifié.'
@@ -684,7 +684,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             </div>
             <h3 className="text-lg font-bold text-white">Vous n'avez pas encore publié de projet</h3>
             <p className="text-sm text-zinc-400 max-w-md mx-auto">
-              Partagez votre première application, bot, script ou logiciel avec la communauté des développeurs ORAX.
+              Partagez votre première application, bot, script ou logiciel avec la communauté des développeurs NEXORA.
             </p>
             <button
               onClick={onOpenPublish}

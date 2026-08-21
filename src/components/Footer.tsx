@@ -28,7 +28,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onSelectCategory, on
                 <FolderGit2 className="w-5 h-5" />
               </div>
               <span className="font-extrabold tracking-tight text-xl text-white font-mono">
-                ORAX<span className="text-cyan-400">PROJET</span>
+                NEX<span className="text-cyan-400">ORA</span>
               </span>
             </div>
             
@@ -200,7 +200,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onSelectCategory, on
         {/* Bottom developer credit: LORD DEMON */}
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
           <p className="text-zinc-500 text-center sm:text-left">
-            © 2026 <strong className="text-zinc-300 font-semibold font-mono">ORAX PROJET</strong> — Tous droits réservés.
+            © 2026 <strong className="text-zinc-300 font-semibold font-mono">NEXORA</strong> — Tous droits réservés.
           </p>
 
           <div className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-300 shadow-md">

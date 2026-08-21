@@ -98,17 +98,17 @@ export function validateAndLogFirebaseConfig(): void {
   const diagnostic = getFirebaseConfigDiagnostic();
   if (diagnostic.status === 'unconfigured') {
     console.warn(
-      '%c[ORAX Cloud Engine]%c Configuration Firebase requise. Configurez les variables VITE_FIREBASE_* (ou FIREBASE_*) sur Netlify ou dans votre fichier .env.',
+      '%c[NEXORA Cloud Engine]%c Configuration Firebase requise. Configurez les variables VITE_FIREBASE_* (ou FIREBASE_*) sur Netlify ou dans votre fichier .env.',
       'color: #f59e0b; font-weight: bold;',
       'color: #94a3b8;'
     );
   } else if (diagnostic.status === 'incomplete') {
     console.warn(
-      `[ORAX Cloud Engine] Configuration incomplète. Variables manquantes : ${diagnostic.missingVariables.join(', ')}.`
+      `[NEXORA Cloud Engine] Configuration incomplète. Variables manquantes : ${diagnostic.missingVariables.join(', ')}.`
     );
   } else {
     console.info(
-      '%c[ORAX Cloud Engine]%c Connecté à Firebase Firestore Cloud : ' + diagnostic.projectId,
+      '%c[NEXORA Cloud Engine]%c Connecté à Firebase Firestore Cloud : ' + diagnostic.projectId,
       'color: #10b981; font-weight: bold;',
       'color: #94a3b8;'
     );
@@ -1722,7 +1722,7 @@ export async function addProjectComment(
     id: commentId,
     projectId,
     userId: user.uid,
-    userDisplayName: user.displayName || 'Utilisateur ORAX',
+    userDisplayName: user.displayName || 'Utilisateur NEXORA',
     userPhotoURL: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.displayName)}`,
     userIsLordDemon: isLordDemon,
     rating: rating ? Math.max(1, Math.min(5, Math.round(rating))) : undefined,
@@ -2109,7 +2109,7 @@ export function getDevelopersLeaderboard(allProjects: Project[]): DeveloperInfo[
       photoURL: devGroup.isLord
         ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=80'
         : (devGroup.projects[0]?.thumbnail || undefined),
-      bio: devGroup.isLord ? 'Créateur et fondateur de l\'écosystème ORAX PROJET.' : undefined,
+      bio: devGroup.isLord ? 'Créateur et fondateur de l\'écosystème NEXORA.' : undefined,
       projectsCount: devGroup.projects.length,
       totalDownloads,
       totalViews,
@@ -2184,7 +2184,7 @@ export function getDeveloperInfo(
     photoURL: isLordDemon 
       ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=80'
       : (devProjects[0]?.thumbnail || undefined),
-    bio: isLordDemon ? 'Créateur et développeur de l\'écosystème ORAX PROJET.' : undefined,
+    bio: isLordDemon ? 'Créateur et développeur de l\'écosystème NEXORA.' : undefined,
     projectsCount: devProjects.length,
     totalDownloads,
     totalViews,

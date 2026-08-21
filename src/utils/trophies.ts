@@ -86,7 +86,7 @@ export function computeDeveloperTrophies(
     {
       id: 'first_launch',
       title: 'Pionnier du Code',
-      description: 'Publier votre tout premier projet sur la plateforme ORAX.',
+      description: 'Publier votre tout premier projet sur la plateforme NEXORA.',
       iconName: 'Rocket',
       tier: 'bronze',
       category: 'creator',
@@ -96,7 +96,7 @@ export function computeDeveloperTrophies(
     {
       id: 'prolific_author',
       title: 'Créateur Prolifique',
-      description: 'Publier au moins 3 projets actifs sur ORAX.',
+      description: 'Publier au moins 3 projets actifs sur NEXORA.',
       iconName: 'Layers',
       tier: 'silver',
       category: 'creator',
@@ -330,7 +330,7 @@ export function computeDeveloperTrophies(
 
   // Rank Titles
   const getRankTitle = (lvl: number, isFounder: boolean) => {
-    if (isFounder) return 'Fondateur & Super Admin ORAX';
+    if (isFounder) return 'Fondateur & Super Admin NEXORA';
     if (lvl >= 10) return 'Grand Maître Code';
     if (lvl >= 7) return 'Développeur Élite';
     if (lvl >= 5) return 'Architecte Senior';

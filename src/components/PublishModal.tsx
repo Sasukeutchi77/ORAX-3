@@ -217,7 +217,7 @@ export const PublishModal: React.FC<PublishModalProps> = ({
           {
             version: version.trim() || '1.0.0',
             title: 'Version Initiale',
-            changelog: 'Première publication officielle du projet sur ORAX PROJET.',
+            changelog: 'Première publication officielle du projet sur NEXORA.',
             releaseDate: new Date().toISOString(),
             fileUrl: uploadResult.url,
             fileName: projectFile.name,
@@ -231,7 +231,7 @@ export const PublishModal: React.FC<PublishModalProps> = ({
       setIsUploading(false);
       showToast({
         title: 'Votre projet a été publié avec succès !',
-        message: 'Il est maintenant visible et téléchargeable sur ORAX PROJET.',
+        message: 'Il est maintenant visible et téléchargeable sur NEXORA.',
         type: 'success',
       });
 
@@ -362,7 +362,7 @@ export const PublishModal: React.FC<PublishModalProps> = ({
                       required
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="Ex: ORAX BOT, Modern Portfolio, Flutter Wallet..."
+                      placeholder="Ex: NEXORA BOT, Modern Portfolio, Flutter Wallet..."
                       className="w-full bg-zinc-950 text-sm text-white placeholder-zinc-500 px-4 py-2.5 rounded-xl border border-zinc-800 focus:outline-none focus:border-cyan-500/60"
                     />
                   </div>

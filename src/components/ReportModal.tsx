@@ -111,7 +111,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </div>
             <h3 className="text-xl font-bold text-white font-mono">Signalement Enregistré</h3>
             <p className="text-sm text-zinc-400 max-w-sm mx-auto">
-              Merci de contribuer à la sécurité et à la qualité d'ORAX PROJET. L'administrateur va examiner ce projet sans délai.
+              Merci de contribuer à la sécurité et à la qualité de NEXORA. L'administrateur va examiner ce projet sans délai.
             </p>
           </div>
         ) : (

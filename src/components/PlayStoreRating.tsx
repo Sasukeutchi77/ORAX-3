@@ -387,7 +387,7 @@ export const PlayStoreRatingSection: React.FC<PlayStoreRatingSectionProps> = ({
               <span>Notes et avis</span>
             </h3>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Les notes et les avis sont vérifiés et proviennent de la communauté de développeurs ORAX.
+              Les notes et les avis sont vérifiés et proviennent de la communauté de développeurs NEXORA.
             </p>
           </div>
 

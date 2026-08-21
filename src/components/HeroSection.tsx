@@ -57,7 +57,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
           >
             <span className="flex items-center gap-1.5 font-bold">
               <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <span>ORAX PROJET</span>
+              <span>NEXORA</span>
             </span>
             <span className="text-zinc-600">•</span>
             <span className="text-zinc-300 font-sans">
@@ -86,7 +86,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
             transition={{ duration: 0.5, delay: 0.2 }}
             className="mt-5 text-base sm:text-lg text-zinc-300 max-w-2xl mx-auto leading-relaxed"
           >
-            <strong className="text-white font-semibold">ORAX PROJET</strong> est une plateforme dédiée au partage et à la découverte de projets numériques, bots, codes sources et utilitaires logiciels.
+            <strong className="text-white font-semibold">NEXORA</strong> est une plateforme dédiée au partage et à la découverte de projets numériques, bots, codes sources et utilitaires logiciels.
           </motion.p>
 
           {/* Hero Search Box */}

@@ -127,8 +127,8 @@ export const TrophyShareModal: React.FC<TrophyShareModalProps> = ({
   const IconComp = ICON_MAP[trophy.iconName] || Trophy;
 
   const shareUrl = `${window.location.origin}/#trophy/${encodeURIComponent(developerName)}/${trophy.id}`;
-  const shareText = `🏆 J'ai débloqué le trophée "${trophy.title}" (${tierStyle.name}) sur ORAX PROJET ! Découvrez mes projets et créations :`;
-  const markdownBadge = `[![Trophée ORAX: ${trophy.title}](https://img.shields.io/badge/ORAX%20PROJET-${encodeURIComponent(trophy.title)}-06b6d4?style=for-the-badge&logo=rocket)](${shareUrl})`;
+  const shareText = `🏆 J'ai débloqué le trophée "${trophy.title}" (${tierStyle.name}) sur NEXORA ! Découvrez mes projets et créations :`;
+  const markdownBadge = `[![Trophée NEXORA: ${trophy.title}](https://img.shields.io/badge/NEXORA-${encodeURIComponent(trophy.title)}-06b6d4?style=for-the-badge&logo=rocket)](${shareUrl})`;
 
   const handleCopyLink = async () => {
     try {
@@ -175,7 +175,7 @@ export const TrophyShareModal: React.FC<TrophyShareModalProps> = ({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `Trophée ORAX : ${trophy.title}`,
+          title: `Trophée NEXORA : ${trophy.title}`,
           text: shareText,
           url: shareUrl,
         });
@@ -212,7 +212,7 @@ export const TrophyShareModal: React.FC<TrophyShareModalProps> = ({
                   Publier & Partager le Trophée
                 </h2>
                 <p className="text-xs text-zinc-400">
-                  Vitrine de récompense officielle ORAX
+                  Vitrine de récompense officielle NEXORA
                 </p>
               </div>
             </div>
@@ -257,7 +257,7 @@ export const TrophyShareModal: React.FC<TrophyShareModalProps> = ({
 
             <div className="flex items-center justify-between border-t border-zinc-800/80 pt-3 text-[11px] text-zinc-400 relative z-10 font-mono">
               <span>Attribué à : <strong className="text-white">{developerName}</strong></span>
-              <span className="text-cyan-400 font-bold">ORAX PROJET</span>
+              <span className="text-cyan-400 font-bold">NEXORA</span>
             </div>
           </div>
 

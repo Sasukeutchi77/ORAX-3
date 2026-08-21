@@ -849,16 +849,16 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                       {isLordDemon && (
                         <span className="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold bg-cyan-500/30 text-cyan-300 border border-cyan-400/60 flex items-center gap-1 shadow-sm">
                           <Sparkles className="w-3 h-3 text-cyan-300" />
-                          Créateur ORAX
+                          Créateur NEXORA
                         </span>
                       )}
                     </div>
                     <p className="text-xs text-zinc-400 mt-1">
                       {isLordDemon 
-                        ? 'Fondateur & Lead Developer officiel de la plateforme ORAX PROJET.' 
+                        ? 'Fondateur & Lead Developer officiel de la plateforme NEXORA.' 
                         : (isCertified 
-                            ? 'Développeur Certifié ORAX (+50 téléchargements et +100 vues atteints).' 
-                            : 'Développeur sur l\'écosystème ORAX PROJET.')}
+                            ? 'Développeur Certifié NEXORA (+50 téléchargements et +100 vues atteints).' 
+                            : 'Développeur sur l\'écosystème NEXORA.')}
                     </p>
                   </div>
                 </div>
