@@ -121,7 +121,7 @@ export const TrophyShareModal: React.FC<TrophyShareModalProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedMarkdown, setCopiedMarkdown] = useState(false);
 
-  if (!isOpen || !trophy) return null;
+  if (!isOpen || !trophy || !isOwner) return null;
 
   const tierStyle = TIER_STYLES[trophy.tier] || TIER_STYLES.bronze;
   const IconComp = ICON_MAP[trophy.iconName] || Trophy;

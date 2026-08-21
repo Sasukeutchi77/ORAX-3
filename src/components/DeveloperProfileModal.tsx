@@ -17,7 +17,7 @@ import {
   Code2
 } from 'lucide-react';
 import { Project, UserProfile, DeveloperInfo } from '../types';
-import { getDeveloperInfo, toggleFollowDeveloper, isFollowingDeveloper } from '../services/firebase';
+import { getDeveloperInfo, toggleFollowDeveloper, isFollowingDeveloper, updateTrophiesPrivacy, togglePublishTrophy, setPinnedTrophy } from '../services/firebase';
 import { getDeveloperCertification } from '../utils/certification';
 import { VerifiedBadge } from './VerifiedBadge';
 import { ProjectCard } from './ProjectCard';
@@ -63,6 +63,81 @@ export const DeveloperProfileModal: React.FC<DeveloperProfileModalProps> = ({
     if (!devInfo) return false;
     return isFollowingDeveloper(devInfo.name, currentUser) || isFollowingDeveloper(devInfo.id, currentUser);
   }, [devInfo, currentUser]);
+
+  const isOwner = useMemo(() => {
+    if (!currentUser || !devInfo) return false;
+    const currentName = (currentUser.displayName || '').trim().toLowerCase();
+    const devName = (devInfo.name || '').trim().toLowerCase();
+    return Boolean(
+      (currentName && devName && currentName === devName) ||
+      (currentUser.uid && (currentUser.uid === devInfo.id || currentUser.uid === (devInfo as any).ownerId))
+    );
+  }, [currentUser, devInfo]);
+
+  const handleTogglePrivacy = async (newPrivacy: 'public' | 'private') => {
+    if (!currentUser || !isOwner) return;
+    try {
+      const updated = await updateTrophiesPrivacy(newPrivacy, currentUser);
+      if (onUpdateUser) onUpdateUser(updated);
+      showToast({
+        title: 'Visibilité mise à jour',
+        message: newPrivacy === 'public' 
+          ? 'Vos trophées sont désormais visibles publiquement.' 
+          : 'Vos trophées sont désormais masqués aux visiteurs.',
+        type: 'success',
+      });
+    } catch (err: any) {
+      showToast({
+        title: 'Erreur',
+        message: err.message || 'Impossible de modifier la visibilité.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleTogglePublishTrophy = async (trophyId: string) => {
+    if (!currentUser || !isOwner) return;
+    try {
+      const res = await togglePublishTrophy(trophyId, currentUser);
+      if (onUpdateUser) onUpdateUser(res.user);
+      showToast({
+        title: res.isPublished ? 'Trophée Publié !' : 'Publication Retirée',
+        message: res.isPublished 
+          ? 'Ce trophée est maintenant mis en avant dans vos accomplissements.'
+          : 'Ce trophée a été retiré de votre vitrine.',
+        type: 'success',
+      });
+    } catch (err: any) {
+      showToast({
+        title: 'Erreur',
+        message: err.message || 'Impossible de mettre à jour le statut du trophée.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleTogglePinTrophy = async (trophyId: string) => {
+    if (!currentUser || !isOwner) return;
+    try {
+      const isCurrentlyPinned = currentUser.pinnedTrophyId === trophyId;
+      const newPinned = isCurrentlyPinned ? null : trophyId;
+      const updated = await setPinnedTrophy(newPinned, currentUser);
+      if (onUpdateUser) onUpdateUser(updated);
+      showToast({
+        title: newPinned ? 'Trophée Épinglé !' : 'Trophée Détaché',
+        message: newPinned 
+          ? 'Ce trophée est maintenant épinglé en tête de votre profil.'
+          : 'Le trophée a été détaché de l\'en-tête.',
+        type: 'success',
+      });
+    } catch (err: any) {
+      showToast({
+        title: 'Erreur',
+        message: err.message || 'Impossible d\'épingler ce trophée.',
+        type: 'error',
+      });
+    }
+  };
 
   if (!developerIdentifier || !devInfo) return null;
 
@@ -369,10 +444,13 @@ export const DeveloperProfileModal: React.FC<DeveloperProfileModalProps> = ({
                 developerName={devInfo.name} 
                 userProjects={devInfo.projects} 
                 compact={false} 
-                isOwner={Boolean(currentUser && (currentUser.displayName.toLowerCase() === devInfo.name.toLowerCase() || currentUser.uid === devInfo.id))}
-                privacy={devInfo.trophiesPrivacy || (currentUser && (currentUser.displayName.toLowerCase() === devInfo.name.toLowerCase() || currentUser.uid === devInfo.id) ? currentUser.trophiesPrivacy : 'public')}
-                publishedTrophies={devInfo.publishedTrophies || []}
-                pinnedTrophyId={devInfo.pinnedTrophyId}
+                isOwner={isOwner}
+                privacy={devInfo.trophiesPrivacy || (isOwner && currentUser ? currentUser.trophiesPrivacy : 'public')}
+                onTogglePrivacy={isOwner ? handleTogglePrivacy : undefined}
+                onTogglePublishTrophy={isOwner ? handleTogglePublishTrophy : undefined}
+                onTogglePinTrophy={isOwner ? handleTogglePinTrophy : undefined}
+                publishedTrophies={devInfo.publishedTrophies || (isOwner && currentUser ? currentUser.publishedTrophies : []) || []}
+                pinnedTrophyId={devInfo.pinnedTrophyId || (isOwner && currentUser ? currentUser.pinnedTrophyId : undefined)}
               />
             </div>
           </div>

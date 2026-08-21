@@ -1,9 +1,16 @@
 import { CloudinaryUploadResult, CloudinaryConfigDiagnostic } from '../types';
 
-// Cloudinary settings strictly from Vite frontend environment variables
+// Helper to retrieve environment variable with or without VITE_ prefix (e.g. on Netlify / Vercel)
+const getEnvVar = (viteKey: string, shortKey: string): string => {
+  const env = (import.meta.env as Record<string, any>) || {};
+  const val = env[viteKey] ?? env[shortKey] ?? (typeof process !== 'undefined' && process.env ? (process.env[viteKey] ?? process.env[shortKey]) : '');
+  return typeof val === 'string' ? val.trim() : '';
+};
+
+// Cloudinary settings from frontend environment variables (supports VITE_CLOUDINARY_* and CLOUDINARY_*)
 // SECURITY NOTE: Never declare or import CLOUDINARY_API_SECRET in the client bundle.
-const CLOUD_NAME = (import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || '').trim();
-const UPLOAD_PRESET = (import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || '').trim();
+const CLOUD_NAME = getEnvVar('VITE_CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_CLOUD_NAME');
+const UPLOAD_PRESET = getEnvVar('VITE_CLOUDINARY_UPLOAD_PRESET', 'CLOUDINARY_UPLOAD_PRESET');
 
 // Configurable Limits
 export const MAX_FILE_SIZE = 250 * 1024 * 1024; // 250 MB
@@ -50,8 +57,8 @@ export function getCloudinaryConfig(): { cloudName: string; isConfigured: boolea
  */
 export function getCloudinaryConfigDiagnostic(): CloudinaryConfigDiagnostic {
   const vars = [
-    { name: 'VITE_CLOUDINARY_CLOUD_NAME', present: Boolean(CLOUD_NAME) },
-    { name: 'VITE_CLOUDINARY_UPLOAD_PRESET', present: Boolean(UPLOAD_PRESET) },
+    { name: 'VITE_CLOUDINARY_CLOUD_NAME / CLOUDINARY_CLOUD_NAME', present: Boolean(CLOUD_NAME) },
+    { name: 'VITE_CLOUDINARY_UPLOAD_PRESET / CLOUDINARY_UPLOAD_PRESET', present: Boolean(UPLOAD_PRESET) },
   ];
 
   const missingVariables = vars.filter((v) => !v.present).map((v) => v.name);

@@ -201,15 +201,15 @@ export const TrophiesDisplay: React.FC<TrophiesDisplayProps> = ({
           {(activeStats.trophies || []).slice(0, 7).map((t) => (
             <div 
               key={t.id} 
-              className={`p-1.5 rounded-lg border text-xs transition-transform hover:scale-110 cursor-pointer ${
+              className={`p-1.5 rounded-lg border text-xs transition-transform ${
                 t.isUnlocked 
-                  ? getTierBadgeStyle(t.tier) 
+                  ? `${getTierBadgeStyle(t.tier)} ${isOwner ? 'hover:scale-110 cursor-pointer' : ''}` 
                   : 'bg-zinc-950/60 border-zinc-800/80 text-zinc-600 opacity-40'
               }`}
               onClick={() => {
-                if (t.isUnlocked) setActiveShareTrophy(t);
+                if (t.isUnlocked && isOwner) setActiveShareTrophy(t);
               }}
-              title={`${t.title} (${t.isUnlocked ? 'Débloqué ! Cliquer pour partager' : 'Verrouillé'})`}
+              title={`${t.title} (${t.isUnlocked ? (isOwner ? 'Débloqué ! Cliquer pour publier & partager' : 'Débloqué par le développeur') : 'Verrouillé'})`}
             >
               {renderIcon(t.iconName, 'w-3.5 h-3.5')}
             </div>
@@ -352,14 +352,16 @@ export const TrophiesDisplay: React.FC<TrophiesDisplayProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setActiveShareTrophy(pinnedTrophy)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold transition-all"
-            >
-              <Share2 className="w-3.5 h-3.5 text-amber-400" />
-              <span>Partager ce trophée</span>
-            </button>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setActiveShareTrophy(pinnedTrophy)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold transition-all"
+              >
+                <Share2 className="w-3.5 h-3.5 text-amber-400" />
+                <span>Publier & Partager ce trophée</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -411,15 +413,15 @@ export const TrophiesDisplay: React.FC<TrophiesDisplayProps> = ({
               {/* Top Row: Icon + Tier Pill */}
               <div className="flex items-start justify-between gap-3 mb-3">
                 <div 
-                  className={`w-12 h-12 rounded-xl flex items-center justify-center border shadow-md cursor-pointer ${
+                  className={`w-12 h-12 rounded-xl flex items-center justify-center border shadow-md ${
                     isUnlocked
-                      ? getTierBadgeStyle(trophy.tier)
+                      ? `${getTierBadgeStyle(trophy.tier)} ${isOwner ? 'cursor-pointer' : ''}`
                       : 'bg-zinc-900 border-zinc-800 text-zinc-600'
                   }`}
                   onClick={() => {
-                    if (isUnlocked) setActiveShareTrophy(trophy);
+                    if (isUnlocked && isOwner) setActiveShareTrophy(trophy);
                   }}
-                  title={isUnlocked ? 'Cliquer pour publier ou partager' : 'Trophée verrouillé'}
+                  title={isUnlocked ? (isOwner ? 'Cliquer pour publier ou partager' : 'Trophée débloqué par le développeur') : 'Trophée verrouillé'}
                 >
                   {isUnlocked ? renderIcon(trophy.iconName, 'w-6 h-6') : <Lock className="w-5 h-5 text-zinc-600" />}
                 </div>
@@ -474,31 +476,40 @@ export const TrophiesDisplay: React.FC<TrophiesDisplayProps> = ({
                   />
                 </div>
 
-                {/* Publish & Share Button on Unlocked Trophies */}
+                {/* Owner controls OR Unlocked visitor indicator */}
                 {isUnlocked && (
                   <div className="pt-2 flex items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setActiveShareTrophy(trophy)}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-mono font-semibold transition-all shadow-sm active:scale-95"
-                    >
-                      <Share2 className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Publier & Partager</span>
-                    </button>
+                    {isOwner ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setActiveShareTrophy(trophy)}
+                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-mono font-semibold transition-all shadow-sm active:scale-95"
+                        >
+                          <Share2 className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Publier & Partager</span>
+                        </button>
 
-                    {isOwner && onTogglePinTrophy && (
-                      <button
-                        type="button"
-                        onClick={() => onTogglePinTrophy(trophy.id)}
-                        className={`p-1.5 rounded-xl border transition-colors ${
-                          isPinned
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                            : 'bg-zinc-800/60 text-zinc-400 hover:text-white border-zinc-700'
-                        }`}
-                        title={isPinned ? 'Détacher de la vitrine' : 'Épingler en tête'}
-                      >
-                        <Pin className={`w-3.5 h-3.5 ${isPinned ? 'fill-amber-300' : ''}`} />
-                      </button>
+                        {onTogglePinTrophy && (
+                          <button
+                            type="button"
+                            onClick={() => onTogglePinTrophy(trophy.id)}
+                            className={`p-1.5 rounded-xl border transition-colors ${
+                              isPinned
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                : 'bg-zinc-800/60 text-zinc-400 hover:text-white border-zinc-700'
+                            }`}
+                            title={isPinned ? 'Détacher de la vitrine' : 'Épingler en tête'}
+                          >
+                            <Pin className={`w-3.5 h-3.5 ${isPinned ? 'fill-amber-300' : ''}`} />
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <div className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/30 border border-emerald-500/20 text-emerald-400 text-xs font-mono">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Trophée débloqué par le développeur</span>
+                      </div>
                     )}
                   </div>
                 )}

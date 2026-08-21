@@ -214,6 +214,16 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   };
 
   const handleDownload = async () => {
+    if (!currentUser) {
+      showToast({
+        title: 'Connexion requise',
+        message: 'Vous devez créer un compte ou vous connecter pour télécharger les projets publiés.',
+        type: 'warning',
+      });
+      if (onOpenAuth) onOpenAuth();
+      return;
+    }
+
     if (downloading) return;
     setDownloading(true);
 
@@ -224,7 +234,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     });
 
     try {
-      const downloadPromise = triggerProjectDownload(project);
+      const result = await triggerProjectDownload(project);
 
       try {
         confetti({
@@ -245,16 +255,12 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
           console.warn('Non-blocking download tracking notice:', trackingErr);
         });
 
-      await downloadPromise;
-
-      setTimeout(() => {
-        setDownloading(false);
-        showToast({
-          title: 'Téléchargement réussi !',
-          message: `Le fichier "${project.fileName || project.name}" a été transmis avec succès.`,
-          type: 'success',
-        });
-      }, 800);
+      setDownloading(false);
+      showToast({
+        title: 'Téléchargement réussi !',
+        message: result.message || `Le fichier "${result.fileName}" a été enregistré dans vos Téléchargements.`,
+        type: 'success',
+      });
     } catch (err: any) {
       setDownloading(false);
       showToast({
@@ -1087,15 +1093,35 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              if (rel.fileUrl) {
-                                triggerProjectDownload({
-                                  ...project,
-                                  fileUrl: rel.fileUrl,
-                                  fileName: rel.fileName || `${project.name}-v${rel.version}.zip`
+                            onClick={async () => {
+                              if (!currentUser) {
+                                showToast({
+                                  title: 'Connexion requise',
+                                  message: 'Vous devez créer un compte ou vous connecter pour télécharger.',
+                                  type: 'warning',
                                 });
-                              } else {
-                                handleDownload();
+                                if (onOpenAuth) onOpenAuth();
+                                return;
+                              }
+                              try {
+                                const targetVersionProject = {
+                                  ...project,
+                                  version: rel.version,
+                                  fileUrl: rel.fileUrl || project.fileUrl,
+                                  fileName: rel.fileName || `${project.name}-v${rel.version}.zip`,
+                                };
+                                const res = await triggerProjectDownload(targetVersionProject);
+                                showToast({
+                                  title: `Version v${rel.version} téléchargée`,
+                                  message: res.message || `Le fichier "${res.fileName}" a été enregistré.`,
+                                  type: 'success',
+                                });
+                              } catch (err: any) {
+                                showToast({
+                                  title: 'Erreur lors du téléchargement',
+                                  message: err.message || 'Impossible de télécharger cette version.',
+                                  type: 'error',
+                                });
                               }
                             }}
                             className="px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-cyan-300 hover:text-white border border-zinc-700 transition-all flex items-center gap-1"

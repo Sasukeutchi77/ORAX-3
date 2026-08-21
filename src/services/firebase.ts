@@ -16,7 +16,7 @@ import {
   getFirestore,
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
+  persistentSingleTabManager,
   collection,
   doc,
   getDocs,
@@ -59,13 +59,20 @@ if (typeof window !== 'undefined') {
   } catch {}
 }
 
+// Helper to retrieve environment variable with or without VITE_ prefix (e.g. on Netlify / Vercel)
+const getEnvVar = (viteKey: string, shortKey: string): string => {
+  const env = (import.meta.env as Record<string, any>) || {};
+  const val = env[viteKey] ?? env[shortKey] ?? (typeof process !== 'undefined' && process.env ? (process.env[viteKey] ?? process.env[shortKey]) : '');
+  return typeof val === 'string' ? val.trim() : '';
+};
+
 const firebaseConfig = {
-  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY || '').trim(),
-  authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '').trim(),
-  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID || '').trim(),
-  storageBucket: (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim(),
-  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '').trim(),
-  appId: (import.meta.env.VITE_FIREBASE_APP_ID || '').trim(),
+  apiKey: getEnvVar('VITE_FIREBASE_API_KEY', 'FIREBASE_API_KEY'),
+  authDomain: getEnvVar('VITE_FIREBASE_AUTH_DOMAIN', 'FIREBASE_AUTH_DOMAIN'),
+  projectId: getEnvVar('VITE_FIREBASE_PROJECT_ID', 'FIREBASE_PROJECT_ID'),
+  storageBucket: getEnvVar('VITE_FIREBASE_STORAGE_BUCKET', 'FIREBASE_STORAGE_BUCKET'),
+  messagingSenderId: getEnvVar('VITE_FIREBASE_MESSAGING_SENDER_ID', 'FIREBASE_MESSAGING_SENDER_ID'),
+  appId: getEnvVar('VITE_FIREBASE_APP_ID', 'FIREBASE_APP_ID'),
 };
 
 /**
@@ -91,7 +98,7 @@ export function validateAndLogFirebaseConfig(): void {
   const diagnostic = getFirebaseConfigDiagnostic();
   if (diagnostic.status === 'unconfigured') {
     console.warn(
-      '%c[ORAX Cloud Engine]%c Configuration Firebase requise. Configurez les variables VITE_FIREBASE_* sur Netlify ou dans votre fichier .env.',
+      '%c[ORAX Cloud Engine]%c Configuration Firebase requise. Configurez les variables VITE_FIREBASE_* (ou FIREBASE_*) sur Netlify ou dans votre fichier .env.',
       'color: #f59e0b; font-weight: bold;',
       'color: #94a3b8;'
     );
@@ -110,12 +117,12 @@ export function validateAndLogFirebaseConfig(): void {
 
 export function getFirebaseConfigDiagnostic(): FirebaseConfigDiagnostic {
   const variables = [
-    { name: 'VITE_FIREBASE_API_KEY', present: Boolean(firebaseConfig.apiKey) },
-    { name: 'VITE_FIREBASE_AUTH_DOMAIN', present: Boolean(firebaseConfig.authDomain) },
-    { name: 'VITE_FIREBASE_PROJECT_ID', present: Boolean(firebaseConfig.projectId) },
-    { name: 'VITE_FIREBASE_STORAGE_BUCKET', present: Boolean(firebaseConfig.storageBucket) },
-    { name: 'VITE_FIREBASE_MESSAGING_SENDER_ID', present: Boolean(firebaseConfig.messagingSenderId) },
-    { name: 'VITE_FIREBASE_APP_ID', present: Boolean(firebaseConfig.appId) },
+    { name: 'VITE_FIREBASE_API_KEY / FIREBASE_API_KEY', present: Boolean(firebaseConfig.apiKey) },
+    { name: 'VITE_FIREBASE_AUTH_DOMAIN / FIREBASE_AUTH_DOMAIN', present: Boolean(firebaseConfig.authDomain) },
+    { name: 'VITE_FIREBASE_PROJECT_ID / FIREBASE_PROJECT_ID', present: Boolean(firebaseConfig.projectId) },
+    { name: 'VITE_FIREBASE_STORAGE_BUCKET / FIREBASE_STORAGE_BUCKET', present: Boolean(firebaseConfig.storageBucket) },
+    { name: 'VITE_FIREBASE_MESSAGING_SENDER_ID / FIREBASE_MESSAGING_SENDER_ID', present: Boolean(firebaseConfig.messagingSenderId) },
+    { name: 'VITE_FIREBASE_APP_ID / FIREBASE_APP_ID', present: Boolean(firebaseConfig.appId) },
   ];
 
   const missingVariables = variables.filter(v => !v.present).map(v => v.name);
@@ -153,7 +160,7 @@ if (isFirebaseConfigured()) {
     try {
       db = initializeFirestore(app, {
         localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
+          tabManager: persistentSingleTabManager({ forceOwnership: true }),
         }),
       });
     } catch {
@@ -1261,8 +1268,15 @@ export async function recordProjectDownload(
   id: string, 
   customUserId?: string
 ): Promise<{ downloads: number; isNew: boolean }> {
-  const visitorId = getVisitorIdentifier(customUserId);
-  const debounceKey = `${id}_${visitorId}`;
+  // Only authenticated users increment the official download counter
+  const authUid = auth?.currentUser?.uid || customUserId;
+  if (!authUid) {
+    const current = await getProjectById(id);
+    return { downloads: current?.downloads || 0, isNew: false };
+  }
+
+  const trackerKey = `usr_${authUid.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+  const debounceKey = `${id}_${trackerKey}`;
   const nowMs = Date.now();
 
   if (recentDownloadCalls.has(debounceKey) && nowMs - (recentDownloadCalls.get(debounceKey) || 0) < 2500) {
@@ -1274,9 +1288,6 @@ export async function recordProjectDownload(
   if (db && isFirebaseConfigured()) {
     try {
       const projectRef = doc(db, 'projects', id);
-      const trackerKey = auth?.currentUser?.uid 
-        ? `usr_${auth.currentUser.uid.replace(/[^a-zA-Z0-9_-]/g, '_')}`
-        : `gst_${visitorId.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 80)}`;
       const downloadTrackRef = doc(db, 'projects', id, 'downloads', trackerKey);
 
       const result = await runTransaction(db, async (transaction) => {
@@ -1303,7 +1314,8 @@ export async function recordProjectDownload(
           trackerId: trackerKey,
           createdAt: nowIso,
           type: 'download',
-          isVerifiedUser: Boolean(auth?.currentUser?.uid),
+          isVerifiedUser: true,
+          userId: authUid,
         });
 
         transaction.update(projectRef, {
@@ -1327,8 +1339,15 @@ export async function recordProjectView(
   id: string, 
   customUserId?: string
 ): Promise<{ views: number; isNew: boolean }> {
-  const visitorId = getVisitorIdentifier(customUserId);
-  const debounceKey = `${id}_${visitorId}`;
+  // Only authenticated users increment the official view counter
+  const authUid = auth?.currentUser?.uid || customUserId;
+  if (!authUid) {
+    const current = await getProjectById(id);
+    return { views: current?.views || 0, isNew: false };
+  }
+
+  const trackerKey = `usr_${authUid.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+  const debounceKey = `${id}_${trackerKey}`;
   const nowMs = Date.now();
 
   if (recentViewCalls.has(debounceKey) && nowMs - (recentViewCalls.get(debounceKey) || 0) < 2500) {
@@ -1340,9 +1359,6 @@ export async function recordProjectView(
   if (db && isFirebaseConfigured()) {
     try {
       const projectRef = doc(db, 'projects', id);
-      const trackerKey = auth?.currentUser?.uid 
-        ? `usr_${auth.currentUser.uid.replace(/[^a-zA-Z0-9_-]/g, '_')}`
-        : `gst_${visitorId.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 80)}`;
       const viewTrackRef = doc(db, 'projects', id, 'views', trackerKey);
 
       const result = await runTransaction(db, async (transaction) => {
@@ -1356,7 +1372,7 @@ export async function recordProjectView(
         }
 
         const projectData = projectSnap.data();
-        const currentCount = projectData.views || 1;
+        const currentCount = projectData.views || 0;
 
         if (trackSnap.exists()) {
           return { views: currentCount, isNew: false };
@@ -1369,7 +1385,8 @@ export async function recordProjectView(
           trackerId: trackerKey,
           createdAt: nowIso,
           type: 'view',
-          isVerifiedUser: Boolean(auth?.currentUser?.uid),
+          isVerifiedUser: true,
+          userId: authUid,
         });
 
         transaction.update(projectRef, {
@@ -1386,7 +1403,7 @@ export async function recordProjectView(
     }
   }
 
-  return { views: 1, isNew: true };
+  return { views: 0, isNew: false };
 }
 
 // --------------------------------------------------------------------------
